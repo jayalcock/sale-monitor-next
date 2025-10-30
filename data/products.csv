@@ -1,0 +1,2 @@
+name,url,target_price,discount_threshold,selector,enabled,notification_cooldown_hours
+Example Product,https://example.com/product,199.99,15,.price-selector,true,24
