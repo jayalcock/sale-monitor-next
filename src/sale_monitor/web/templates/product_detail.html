@@ -67,6 +67,14 @@
 let chart = null;
 let refreshInterval;
 
+function parseUtcIso(dateStr) {
+    if (!dateStr) return null;
+    const hasTz = /[zZ]|[\+\-]\d{2}:?\d{2}$/.test(dateStr);
+    const s = hasTz ? dateStr : `${dateStr}Z`;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+}
+
 function getUrlParameter(name) {
     const params = new URLSearchParams(window.location.search);
     return params.get(name);
@@ -80,8 +88,8 @@ function formatPrice(price) {
 }
 
 function formatDate(dateStr) {
-    if (!dateStr) return 'Never';
-    const date = new Date(dateStr);
+    const date = parseUtcIso(dateStr);
+    if (!date) return 'Never';
     return date.toLocaleString();
 }
 
@@ -146,7 +154,10 @@ function loadHistory(url) {
             
             const ctx = document.getElementById('price-chart').getContext('2d');
             
-            const labels = history.map(h => new Date(h.timestamp).toLocaleDateString());
+            const labels = history.map(h => {
+                const d = parseUtcIso(h.timestamp);
+                return d ? d.toLocaleDateString() : '';
+            });
             const prices = history.map(h => h.price);
             
             if (chart) chart.destroy();

@@ -2,7 +2,7 @@
 SQLite-based storage for historical price data.
 """
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -50,7 +50,8 @@ class PriceHistory:
     ):
         """Record a price check."""
         if timestamp is None:
-            timestamp = datetime.now().isoformat()
+            # Store UTC with offset so clients can render correctly in local time
+            timestamp = datetime.now(timezone.utc).isoformat()
         
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -150,9 +151,7 @@ class PriceHistory:
     def get_stats(self, product_url: str, days: Optional[int] = None) -> dict:
         """Get statistics for a product, using frontend-expected key names."""
         history = self.get_history(product_url, days=days)
-        print(f"[DEBUG] get_stats: product_url={product_url}, days={days}, history_records={len(history)}")
         if not history:
-            print(f"[DEBUG] get_stats: No history found for product_url={product_url}")
             return {}
         prices = []
         for _, price, status in history:
@@ -162,20 +161,22 @@ class PriceHistory:
                 prices.append(float(price))
             except (TypeError, ValueError):
                 continue
-        print(f"[DEBUG] get_stats: Successful price records={len(prices)}")
         if not prices:
-            print(f"[DEBUG] get_stats: No successful price records for product_url={product_url}")
             return {}
-        print(f"[DEBUG] get_stats: Returning stats for product_url={product_url}")
-        return {
+        total = len(prices)
+        stats = {
             "min_price": min(prices),
             "max_price": max(prices),
-            "avg_price": sum(prices) / len(prices),
+            "avg_price": sum(prices) / total,
             "current_price": prices[0],  # Most recent
-            "total_checks": len(prices),
+            "total_checks": total,
             "first_check": history[-1][0],
             "latest_check": history[0][0],
         }
+        # Back-compat for existing callers/tests
+        stats["checks_count"] = total
+        stats["last_check"] = stats["latest_check"]
+        return stats
 
     def export_to_csv(self, output_path: str, product_url: Optional[str] = None):
         """Export history to CSV file."""

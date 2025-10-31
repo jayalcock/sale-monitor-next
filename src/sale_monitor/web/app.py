@@ -2,7 +2,7 @@
 Flask web application for Sale Monitor dashboard.
 """
 from flask import Flask, render_template, jsonify, request, Response
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import csv
 import sqlite3
@@ -179,7 +179,7 @@ def create_app():
             state = load_state(flask_app.config['STATE_FILE'])
             state[url] = {
                 'current_price': price,
-                'last_checked': datetime.now().isoformat(),
+                'last_checked': datetime.now(timezone.utc).isoformat(),
                 'last_price': state.get(url, {}).get('current_price', price)
             }
             save_state(flask_app.config['STATE_FILE'], state)

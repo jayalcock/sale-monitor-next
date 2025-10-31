@@ -64,6 +64,15 @@ let refreshInterval;
 let trendsChart = null;
 let allProducts = [];
 
+function parseUtcIso(dateStr) {
+    if (!dateStr) return null;
+    // If string lacks timezone info, treat it as UTC by appending 'Z'
+    const hasTz = /[zZ]|[\+\-]\d{2}:?\d{2}$/.test(dateStr);
+    const s = hasTz ? dateStr : `${dateStr}Z`;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+}
+
 function formatPrice(price) {
     if (price === null || price === undefined) {
         return '<span class="text-muted">N/A</span>';
@@ -72,8 +81,8 @@ function formatPrice(price) {
 }
 
 function formatDate(dateStr) {
-    if (!dateStr) return '<span class="text-muted">Never</span>';
-    const date = new Date(dateStr);
+    const date = parseUtcIso(dateStr);
+    if (!date) return '<span class="text-muted">Never</span>';
     return date.toLocaleString();
 }
 
@@ -224,13 +233,18 @@ function loadTrends() {
             emptyDiv.style.display = 'none';
 
             // Build a unified set of date labels (by day)
-            const allDates = uniq(seriesList.flatMap(item => item.series.map(p => new Date(p.timestamp).toISOString().slice(0,10)))).sort();
+            const allDates = uniq(seriesList.flatMap(item => item.series.map(p => {
+                const d = parseUtcIso(p.timestamp);
+                return d ? d.toISOString().slice(0,10) : null;
+            }).filter(Boolean))).sort();
 
             const datasets = seriesList.map((item, idx) => {
                 // Map day -> latest price for that day
                 const dayMap = {};
                 item.series.forEach(p => {
-                    const d = new Date(p.timestamp).toISOString().slice(0,10);
+                    const dd = parseUtcIso(p.timestamp);
+                    if (!dd) return;
+                    const d = dd.toISOString().slice(0,10);
                     dayMap[d] = p.price; // latest seen wins
                 });
                 const color = colorForIndex(idx);
