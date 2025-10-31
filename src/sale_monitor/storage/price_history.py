@@ -148,23 +148,33 @@ class PriceHistory:
             return deleted
 
     def get_stats(self, product_url: str, days: Optional[int] = None) -> dict:
-        """Get statistics for a product."""
+        """Get statistics for a product, using frontend-expected key names."""
         history = self.get_history(product_url, days=days)
+        print(f"[DEBUG] get_stats: product_url={product_url}, days={days}, history_records={len(history)}")
         if not history:
+            print(f"[DEBUG] get_stats: No history found for product_url={product_url}")
             return {}
-        
-        prices = [price for _, price, status in history if status == "success"]
+        prices = []
+        for _, price, status in history:
+            if status != "success":
+                continue
+            try:
+                prices.append(float(price))
+            except (TypeError, ValueError):
+                continue
+        print(f"[DEBUG] get_stats: Successful price records={len(prices)}")
         if not prices:
+            print(f"[DEBUG] get_stats: No successful price records for product_url={product_url}")
             return {}
-        
+        print(f"[DEBUG] get_stats: Returning stats for product_url={product_url}")
         return {
             "min_price": min(prices),
             "max_price": max(prices),
             "avg_price": sum(prices) / len(prices),
             "current_price": prices[0],  # Most recent
-            "checks_count": len(prices),
+            "total_checks": len(prices),
             "first_check": history[-1][0],
-            "last_check": history[0][0],
+            "latest_check": history[0][0],
         }
 
     def export_to_csv(self, output_path: str, product_url: Optional[str] = None):

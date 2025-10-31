@@ -13,7 +13,7 @@ services:
     environment:
       # General
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-30m}
       - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
       # Email notifications
       - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}

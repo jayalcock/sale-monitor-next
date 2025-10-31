@@ -108,12 +108,11 @@ def create_app():
             url = request.args.get('url')
             if not url:
                 return jsonify({'error': 'URL parameter required'}), 400
-            
+
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             days = int(request.args.get('days', 30))
-            
+
             stats = history.get_stats(url, days=days)
-            
             return jsonify(stats)
         except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
