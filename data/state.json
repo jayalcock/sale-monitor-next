@@ -1,7 +1,7 @@
 {
   "https://ca.store.ui.com/ca/en/category/all-cloud-gateways/products/udm-se": {
     "current_price": 715.0,
-    "last_checked": "2025-10-31T17:00:11.469161",
+    "last_checked": "2025-10-31T17:08:19.222956",
     "last_price": 715.0,
     "name": "Ubiubi Dream Machine SE",
     "selector": "#__next > div > main > div.sc-jucepg-0.egxBqR.sc-1q1cvkk-0.hKqdZr > div > div > div.sc-1q1cvkk-3.mvJNG > div.sc-y2swsu-0.jIGqdq > div > div.sc-pr5ovy-0.byHoTJ > div > div > div.sc-pr5ovy-11.gjkuSz > div > div.sc-pr5ovy-14.jXppHm",
@@ -10,7 +10,7 @@
   },
   "https://ca.store.ui.com/ca/en/category/all-wifi/products/u7-pro": {
     "current_price": 239.0,
-    "last_checked": "2025-10-31T17:00:11.653001",
+    "last_checked": "2025-10-31T17:08:19.393383",
     "last_price": 239.0,
     "name": "Ubiquiti U7-Pro",
     "selector": "#__next > div > main > div.sc-jucepg-0.egxBqR.sc-1q1cvkk-0.hKqdZr > div > div > div.sc-1q1cvkk-3.mvJNG > div.sc-y2swsu-0.jIGqdq > div > div.sc-pr5ovy-0.byHoTJ > div > div > div.sc-pr5ovy-11.gjkuSz > div > div.sc-pr5ovy-14.jXppHm",
@@ -19,7 +19,7 @@
   },
   "https://steedcycles.com/collections/derailleurs/products/sram-x0-eagle-t-type-12-speed-rear-derailleur": {
     "current_price": 801.0,
-    "last_checked": "2025-10-31T17:00:10.315039",
+    "last_checked": "2025-10-31T17:08:18.675015",
     "last_price": 801.0,
     "name": "SRAM X0 T-Type Eagle AXS 12 Spd Rear Derailleur - Steed Cycles",
     "selector": "#ProductSection-template--24021849276723__main-8180668072243 > div > div > div > div:nth-child(2) > div > div:nth-child(2) > div.product-block.product-block--price > span.product__price",
@@ -28,7 +28,7 @@
   },
   "https://steedcycles.com/collections/sram-components/products/sram-force-axs-hrd-e1-flat-mount-brake-shifter": {
     "current_price": 510.0,
-    "last_checked": "2025-10-31T17:00:11.060813",
+    "last_checked": "2025-10-31T17:08:18.870538",
     "last_price": 510.0,
     "name": "SRAM Force AXS HRD E1 Flat Mount Brake Shifter - Steed Cycles",
     "selector": "#ProductSection-template--24021849276723__main-9768379711795 > div > div > div > div:nth-child(2) > div > div:nth-child(2) > div.product-block.product-block--price > span.product__price",
@@ -37,13 +37,16 @@
   },
   "https://steedcycles.com/products/sram-paceline-x-centerlock-rounded-rotor?variant=51915810930995": {
     "current_price": 100.0,
-    "last_checked": "2025-10-31T17:00:35.593260+00:00",
+    "last_checked": "2025-10-31T17:08:19.682133",
     "last_price": 100.0,
-    "selector_source": "auto"
+    "name": "test",
+    "selector": "",
+    "selector_source": "auto",
+    "url": "https://steedcycles.com/products/sram-paceline-x-centerlock-rounded-rotor?variant=51915810930995"
   },
   "https://www.curvecycling.com/products/big-kev-titanium-frameset": {
-    "current_price": 3997.0,
-    "last_checked": "2025-10-31T17:00:09.076283",
+    "current_price": 3996.0,
+    "last_checked": "2025-10-31T17:08:17.039481",
     "last_price": 3997.0,
     "name": "Big Kev Frame",
     "selector": "#price-template--16183649271984__main > div > div > div.price__regular > span.price-item.price-item--regular",
@@ -52,7 +55,7 @@
   },
   "https://www.curvecycling.com/products/dirt-hoops-carbon?variant=44685310558384": {
     "current_price": 2126.0,
-    "last_checked": "2025-10-31T17:00:09.323443",
+    "last_checked": "2025-10-31T17:08:17.787573",
     "last_price": 2126.0,
     "name": "Dirt Hoops",
     "selector": "#price-template--16142904459440__main > div > div > div.price__regular > span.price-item.price-item--regular",
@@ -61,7 +64,7 @@
   },
   "https://www.jensonusa.com/sram-x0-t-type-eagle-axs-12-spd-rear-derailleur": {
     "current_price": 605.0,
-    "last_checked": "2025-10-31T17:00:10.006082",
+    "last_checked": "2025-10-31T17:08:18.432530",
     "last_price": 605.0,
     "name": "SRAM X0 T-Type Eagle AXS 12 Spd Rear Derailleur - Jenson USA",
     "selector": "#price",
