@@ -65,6 +65,24 @@ docker compose logs -f
 docker compose restart
 ```
 
+#### Unraid integration (WebUI and icon)
+
+This project includes Docker labels for Unraid to surface the WebUI link and a custom icon.
+
+- WebUI label (already set): `net.unraid.docker.webui=http://[IP]:[PORT:5050]`
+- Icon label (served by the app): `net.unraid.docker.icon=http://[IP]:[PORT:5050]/static/img/icon.png`
+
+To use a custom icon from this repository:
+1. Place your icon file at `src/sale_monitor/web/static/img/icon.png` (PNG recommended).
+2. Rebuild and redeploy the container so the icon is packaged into the image.
+3. Hard refresh the Unraid Docker page (Ctrl/Cmd+Shift+R) to see the new icon.
+
+Alternative (hosted icon): after pushing to GitHub, you can point the icon label to your repo instead of the running container:
+
+```
+net.unraid.docker.icon=https://raw.githubusercontent.com/<user>/<repo>/<branch>/src/sale_monitor/web/static/img/icon.png
+```
+
 ## Usage
 
 ### Web Dashboard
@@ -77,10 +95,11 @@ PYTHONPATH=src python -m sale_monitor.web.app
 Open http://localhost:5000 in your browser for:
 
 **Dashboard (/):**
-- View all products with current prices and status
-- Search and filter products by name or status
-- Quick toggle enable/disable monitoring
-- Manual price check button for immediate updates
+- Trends chart at the top (7/30/90 days)
+- Compact, scalable table with columns: Product, Merchant, Current Price, Status, Actions
+- Sort by Product, Merchant, or Price; filter by Status; search by Product name
+- Mobile responsive: actions collapse to a dropdown on small screens
+- Quick toggle Enable/Disable monitoring; Manual "Check" to refresh a single product
 - Auto-refreshes every 60 seconds
 
 **Alerts Page (/alerts):**
@@ -178,6 +197,8 @@ Example Product,https://example.com/product,199.99,15,,true,24,
 - `notification_cooldown_hours` - Hours between notifications (default: 24)
 - `selector_source` - One of `manual`, `auto`, or `bookmarklet` (optional; runtime may override)
 
+Note: The dashboard derives the Merchant column from the product URL (domain), so no extra CSV column is required.
+
 ## Project Structure
 ```
 sale-monitor-next
@@ -210,10 +231,13 @@ sale-monitor-next
 │           ├── routes/
 │           │   ├── __init__.py
 │           │   └── products.py
-│           └── templates/
-│               ├── base.html
-│               ├── index.html
-│               └── product_detail.html
+│           ├── templates/
+│           │   ├── base.html
+│           │   ├── index.html
+│           │   └── product_detail.html
+│           └── static/
+│               └── img/
+│                   └── icon.png (you add this)
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -222,6 +246,8 @@ sale-monitor-next
 │   ├── test_notifications.py
 │   ├── test_price_extractor.py
 │   └── test_price_history.py
+├── archived/
+│   └── index-cards-layout.html (previous dashboard layout)
 ├── data/
 │   ├── products.csv
 │   ├── state.json
