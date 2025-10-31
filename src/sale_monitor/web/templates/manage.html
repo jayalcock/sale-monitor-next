@@ -3,6 +3,10 @@
 {% block title %}Manage Products - Sale Monitor{% endblock %}
 
 {% block content %}
+<div id="error-alert" class="alert alert-danger" role="alert" style="display: none;">
+    <strong>Error:</strong> <span id="error-message"></span>
+</div>
+
 <div class="row mb-3">
     <div class="col-12">
         <h1>Manage Products</h1>
@@ -70,15 +74,15 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Target Price</label>
-                        <input type="number" step="0.01" class="form-control" name="target_price">
+                        <input type="text" inputmode="decimal" class="form-control" name="target_price" placeholder="e.g., 99.99">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Discount Threshold (%)</label>
-                        <input type="number" step="0.1" class="form-control" name="discount_threshold">
+                        <input type="text" inputmode="decimal" class="form-control" name="discount_threshold" placeholder="e.g., 15">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Notification Cooldown (hours)</label>
-                        <input type="number" class="form-control" name="notification_cooldown_hours" value="24">
+                        <input type="text" inputmode="numeric" class="form-control" name="notification_cooldown_hours" value="24" placeholder="e.g., 24">
                     </div>
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" name="enabled" checked>
@@ -115,15 +119,15 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Target Price</label>
-                        <input type="number" step="0.01" class="form-control" name="target_price" id="edit-target-price">
+                        <input type="text" inputmode="decimal" class="form-control" name="target_price" id="edit-target-price" placeholder="e.g., 99.99">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Discount Threshold (%)</label>
-                        <input type="number" step="0.1" class="form-control" name="discount_threshold" id="edit-discount">
+                        <input type="text" inputmode="decimal" class="form-control" name="discount_threshold" id="edit-discount" placeholder="e.g., 15">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Notification Cooldown (hours)</label>
-                        <input type="number" class="form-control" name="notification_cooldown_hours" id="edit-cooldown">
+                        <input type="text" inputmode="numeric" class="form-control" name="notification_cooldown_hours" id="edit-cooldown" placeholder="e.g., 24">
                     </div>
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" name="enabled" id="edit-enabled">
@@ -139,9 +143,6 @@
     </div>
 </div>
 
-<div id="error-alert" class="alert alert-danger mt-3" role="alert" style="display: none;">
-    <strong>Error:</strong> <span id="error-message"></span>
-</div>
 {% endblock %}
 
 {% block extra_scripts %}
