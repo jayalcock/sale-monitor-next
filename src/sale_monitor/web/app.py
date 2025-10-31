@@ -456,6 +456,9 @@ def create_app():
             seen_urls = set()
 
             for url, name in products:
+                # If we have a current CSV mapping, restrict to those URLs only
+                if name_by_url and url not in name_by_url:
+                    continue
                 # Deduplicate by URL in case DB has multiple names over time
                 if url in seen_urls:
                     continue
