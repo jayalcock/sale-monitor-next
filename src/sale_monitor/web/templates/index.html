@@ -198,14 +198,12 @@ function renderProductRow(product) {
             data-alert="${status}"
             data-price="${product.current_price || 0}"
             data-merchant="${merchant.toLowerCase()}">
-            <td><strong>${product.name}</strong></td>
-            <td><span class="text-muted">${merchant}</span></td>
+            <td><a href="${historyUrl}" class="text-decoration-none"><strong>${product.name}</strong></a></td>
+            <td><a href="${product.url}" target="_blank" class="text-muted text-decoration-none">${merchant}</a></td>
             <td>${formatPrice(product.current_price)}</td>
             <td>${statusBadge} ${enabledBadge}</td>
             <td class="text-end">
                 <div class="action-buttons btn-group btn-group-sm" role="group">
-                    <a href="${historyUrl}" class="btn btn-outline-primary">📊 History</a>
-                    <a href="${product.url}" target="_blank" class="btn btn-outline-secondary">🔗 Open</a>
                     <button class="btn btn-outline-info" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
                     <button class="btn ${toggleClass}" onclick="toggleProduct('${product.url}', this)">${toggleText}</button>
                 </div>
@@ -214,9 +212,6 @@ function renderProductRow(product) {
                         Actions
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="${historyUrl}">📊 History</a></li>
-                        <li><a class="dropdown-item" href="${product.url}" target="_blank">🔗 Open</a></li>
-                        <li><hr class="dropdown-divider"></li>
                         <li><button class="dropdown-item" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button></li>
                         <li><button class="dropdown-item" onclick="toggleProduct('${product.url}', this)">${toggleText}</button></li>
                     </ul>
