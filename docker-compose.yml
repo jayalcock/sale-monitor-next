@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: sale-monitor
     restart: unless-stopped
+    labels:
+      - "net.unraid.docker.webui=http://[IP]:[PORT:5050]"
+      - "net.unraid.docker.icon=https://raw.githubusercontent.com/selfhosters/unRAID-CA-templates/master/templates/img/flask.png"
     env_file:
       - .env
     environment:

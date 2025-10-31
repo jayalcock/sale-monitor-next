@@ -4,13 +4,13 @@ beautifulsoup4==4.10.0
 certifi==2025.10.5
 charset-normalizer==2.0.12
 click==8.3.0
-Flask @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_c50ajtxqph/croot/flask_1745600729225/work
+Flask==3.0.0
 gunicorn==21.2.0
 idna==3.11
 iniconfig==2.3.0
 isort==5.13.2
-itsdangerous @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_00jdi1gu23/croot/itsdangerous_1716533346702/work
-Jinja2 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_2cnn4kenrm/croot/jinja2_1741710859444/work
+itsdangerous==2.1.2
+Jinja2==3.1.2
 lazy-object-proxy==1.12.0
 MarkupSafe==3.0.3
 mccabe==0.6.1
@@ -29,5 +29,5 @@ six==1.17.0
 soupsieve==2.8
 toml==0.10.2
 urllib3==1.26.20
-Werkzeug==2.3.7
+Werkzeug==3.0.0
 wrapt==1.13.3
