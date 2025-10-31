@@ -185,9 +185,9 @@ def create_app():
             }
             save_state(flask_app.config['STATE_FILE'], state)
             
-            # Record in history
+            # Record in history (count as success so stats include manual checks)
             history = PriceHistory(flask_app.config['HISTORY_DB'])
-            history.record_price(url, price, 'manual_check')
+            history.record_price(product.url, product.name, price, status='success')
             
             return jsonify({
                 'success': True,
