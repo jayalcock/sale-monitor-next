@@ -58,6 +58,9 @@
                             <th style="cursor: pointer;" onclick="sortTable('name')">
                                 Product <span id="sort-name-icon">⬍</span>
                             </th>
+                            <th style="cursor: pointer;" onclick="sortTable('merchant')">
+                                Merchant <span id="sort-merchant-icon">⬍</span>
+                            </th>
                             <th style="cursor: pointer;" onclick="sortTable('price')">
                                 Current Price <span id="sort-price-icon">⬍</span>
                             </th>
@@ -117,6 +120,18 @@ let allProducts = [];
 let sortBy = 'name';
 let sortDesc = false;
 
+function getMerchant(product) {
+    try {
+        const u = new URL(product.url);
+        // strip leading www.
+        return u.hostname.replace(/^www\./, '');
+    } catch (e) {
+        // Fallback: quick parse
+        const m = (product.url || '').match(/^https?:\/\/([^\/]+)/i);
+        return m ? m[1].replace(/^www\./, '') : '';
+    }
+}
+
 function parseUtcIso(dateStr) {
     if (!dateStr) return null;
     const hasTz = /[zZ]|[\+\-]\d{2}:?\d{2}$/.test(dateStr);
@@ -175,13 +190,16 @@ function renderProductRow(product) {
     const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
     const toggleText = product.enabled ? '⏸ Disable' : '▶️ Enable';
     const toggleClass = product.enabled ? 'btn-warning' : 'btn-success';
+    const merchant = getMerchant(product);
     
     return `
         <tr data-product-name="${product.name.toLowerCase()}" 
             data-status="${product.enabled ? 'enabled' : 'disabled'}" 
             data-alert="${status}"
-            data-price="${product.current_price || 0}">
+            data-price="${product.current_price || 0}"
+            data-merchant="${merchant.toLowerCase()}">
             <td><strong>${product.name}</strong></td>
+            <td><span class="text-muted">${merchant}</span></td>
             <td>${formatPrice(product.current_price)}</td>
             <td>${statusBadge} ${enabledBadge}</td>
             <td class="text-end">
@@ -218,6 +236,7 @@ function sortTable(column) {
     
     // Update sort icons
     document.getElementById('sort-name-icon').textContent = '⬍';
+    document.getElementById('sort-merchant-icon').textContent = '⬍';
     document.getElementById('sort-price-icon').textContent = '⬍';
     
     const icon = sortDesc ? '▼' : '▲';
@@ -247,6 +266,9 @@ function filterAndSortProducts() {
         if (sortBy === 'name') {
             compareA = a.name.toLowerCase();
             compareB = b.name.toLowerCase();
+        } else if (sortBy === 'merchant') {
+            compareA = getMerchant(a).toLowerCase();
+            compareB = getMerchant(b).toLowerCase();
         } else if (sortBy === 'price') {
             compareA = parseFloat(a.current_price || 0);
             compareB = parseFloat(b.current_price || 0);
