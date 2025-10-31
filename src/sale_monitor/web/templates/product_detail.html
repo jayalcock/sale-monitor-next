@@ -105,12 +105,27 @@ function loadProductInfo(url) {
             
             document.getElementById('product-name').textContent = product.name;
             
+            // Determine selector display
+            let selectorInfo = '';
+            if (product.selector) {
+                const selectorSource = product.selector_source || 'manual';
+                const sourceBadge = selectorSource === 'auto' 
+                    ? '<span class="badge bg-info">Auto-detected</span>' 
+                    : selectorSource === 'manual'
+                    ? '<span class="badge bg-primary">Manual</span>'
+                    : '<span class="badge bg-warning">Bookmarklet</span>';
+                selectorInfo = `<p><strong>Price Selector:</strong> <code>${product.selector}</code> ${sourceBadge}</p>`;
+            } else {
+                selectorInfo = '<p><strong>Price Selector:</strong> <span class="badge bg-info">Auto-detection</span></p>';
+            }
+            
             const statusHtml = `
                 <p><strong>Current Price:</strong> ${formatPrice(product.current_price)}</p>
                 <p><strong>Target Price:</strong> ${formatPrice(product.target_price)}</p>
                 <p><strong>Discount Threshold:</strong> ${product.discount_threshold}%</p>
                 <p><strong>Last Checked:</strong> ${formatDate(product.last_checked)}</p>
                 <p><strong>Status:</strong> <span class="badge ${product.enabled ? 'bg-success' : 'bg-secondary'}">${product.enabled ? 'Enabled' : 'Disabled'}</span></p>
+                ${selectorInfo}
                 <p><a href="${product.url}" target="_blank" class="btn btn-sm btn-primary">View Product Page</a></p>
             `;
             document.getElementById('current-status').innerHTML = statusHtml;

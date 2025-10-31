@@ -34,7 +34,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
 
     updated = 0
     for p in enabled:
-        price = extractor.extract_price(p.url, p.selector)
+        price, selector_source = extractor.extract_price(p.url, p.selector)
         if price is None:
             logging.warning(f"{p.name}: price not found")
             continue
@@ -53,6 +53,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
             "name": p.name,
             "url": p.url,
             "selector": p.selector,
+            "selector_source": selector_source,  # Track how selector was determined
             "current_price": price,
             "last_checked": now,
             "last_price": old_price,

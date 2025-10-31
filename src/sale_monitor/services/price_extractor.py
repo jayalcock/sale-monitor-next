@@ -1,10 +1,12 @@
 import logging
 import re
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
+
+from sale_monitor.services.auto_detector import PriceAutoDetector
 
 
 class PriceExtractor:
@@ -20,9 +22,14 @@ class PriceExtractor:
         })
         self.timeout = timeout
         self.max_retries = max_retries
+        self.auto_detector = PriceAutoDetector()
 
-    def extract_price(self, url: str, selector: str) -> Optional[float]:
-        """Extract price from a webpage using CSS selector."""
+    def extract_price(self, url: str, selector: str = "") -> Tuple[Optional[float], str]:
+        """Extract price from a webpage using CSS selector or auto-detection.
+        
+        Returns:
+            Tuple of (price, selector_source) where selector_source is 'manual', 'auto', or empty string on failure
+        """
         for attempt in range(self.max_retries):
             try:
                 resp = self.session.get(url, timeout=self.timeout)
@@ -30,22 +37,45 @@ class PriceExtractor:
                     logging.warning("GET %s -> %s", url, resp.status_code)
                     raise requests.RequestException(f"HTTP {resp.status_code}")
                 soup = BeautifulSoup(resp.text, "html.parser")
-                el = soup.select_one(selector)
-                if not el:
-                    logging.warning("Selector not found: %s on %s", selector, url)
-                    return None
-                text = el.get_text(strip=True)
-                price = self._parse_price(text)
-                if price is not None:
-                    return price
-                logging.warning("Failed to parse price from: %s", text)
+                
+                # Try manual selector first if provided
+                if selector:
+                    el = soup.select_one(selector)
+                    if el:
+                        text = el.get_text(strip=True)
+                        price = self._parse_price(text)
+                        if price is not None:
+                            return price, 'manual'
+                        logging.warning("Failed to parse price from manual selector: %s", text)
+                    else:
+                        logging.warning("Manual selector not found: %s on %s", selector, url)
+                
+                # Try auto-detection if manual failed or no selector provided
+                detected_selector, platform, confidence = self.auto_detector.detect_price(resp.text)
+                if detected_selector:
+                    el = soup.select_one(detected_selector)
+                    if el:
+                        text = el.get_text(strip=True)
+                        price = self._parse_price(text)
+                        if price is not None:
+                            logging.info("Auto-detected price on %s using %s selector (confidence: %.0f%%)", 
+                                       url, platform, confidence * 100)
+                            return price, 'auto'
+                        logging.warning("Auto-detected selector found but failed to parse price: %s", text)
+                    else:
+                        logging.warning("Auto-detected selector not found in soup: %s", detected_selector)
+                
+                # Both methods failed
+                logging.warning("Failed to extract price from %s (selector: %s, auto-detection: %s)", 
+                              url, selector or "none", "failed" if not detected_selector else "parse failed")
+                
             except requests.exceptions.RequestException as e:
                 logging.error("Request failed (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
 
             if attempt < self.max_retries - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
 
-        return None
+        return None, ""
 
     def _parse_price(self, price_text: str) -> Optional[float]:
         """Parse numeric price from text, handling common separators."""

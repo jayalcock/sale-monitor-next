@@ -7,6 +7,7 @@ import os
 import csv
 import sqlite3
 import requests
+import logging
 
 from sale_monitor.storage.csv_products import read_products
 from sale_monitor.storage.json_state import load_state, save_state
@@ -170,7 +171,7 @@ def create_app():
                 timeout=flask_app.config['TIMEOUT'],
                 max_retries=flask_app.config['MAX_RETRIES']
             )
-            price = extractor.extract_price(product.url, product.selector)
+            price, selector_source = extractor.extract_price(product.url, product.selector)
             
             if price is None:
                 return jsonify({'error': 'Failed to extract price'}), 500
@@ -180,7 +181,8 @@ def create_app():
             state[url] = {
                 'current_price': price,
                 'last_checked': datetime.now(timezone.utc).isoformat(),
-                'last_price': state.get(url, {}).get('current_price', price)
+                'last_price': state.get(url, {}).get('current_price', price),
+                'selector_source': selector_source
             }
             save_state(flask_app.config['STATE_FILE'], state)
             
@@ -191,7 +193,8 @@ def create_app():
             return jsonify({
                 'success': True,
                 'price': price,
-                'timestamp': state[url]['last_checked']
+                'timestamp': state[url]['last_checked'],
+                'selector_source': selector_source
             })
         except (OSError, ValueError, sqlite3.Error, requests.exceptions.RequestException) as e:
             return jsonify({'error': str(e)}), 500
@@ -219,14 +222,56 @@ def create_app():
         except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
+    @flask_app.route('/api/products/auto-detect-all', methods=['POST'])
+    def api_auto_detect_all():
+        """Attempt to auto-detect price selectors for all products."""
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            
+            extractor = PriceExtractor(
+                user_agent=flask_app.config['USER_AGENT'],
+                timeout=flask_app.config['TIMEOUT'],
+                max_retries=flask_app.config['MAX_RETRIES']
+            )
+            
+            successful = 0
+            failed = 0
+            
+            for product in products:
+                try:
+                    # Try to extract price with empty selector to force auto-detection
+                    price, selector_source = extractor.extract_price(product.url, "")
+                    
+                    if price is not None and selector_source == 'auto':
+                        # Auto-detection succeeded - update the product
+                        product.selector_source = 'auto'
+                        successful += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    logging.error(f"Auto-detect failed for {product.url}: {e}")
+                    failed += 1
+            
+            # Write updated products back to CSV
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
+            
+            return jsonify({
+                'success': True,
+                'successful': successful,
+                'failed': failed
+            })
+        except Exception as e:
+            logging.error(f"Bulk auto-detect error: {e}")
+            return jsonify({'error': str(e)}), 500
+    
     @flask_app.route('/api/product/add', methods=['POST'])
     def api_add_product():
         """Add a new product."""
         try:
             data = request.get_json()
             
-            # Validate required fields
-            required = ['name', 'url', 'selector']
+            # Validate required fields (selector is now optional)
+            required = ['name', 'url']
             for field in required:
                 if not data.get(field):
                     return jsonify({'error': f'{field} is required'}), 400
@@ -503,7 +548,7 @@ def _write_products_csv(filepath, products):
     try:
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours'])
+            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours', 'selector_source'])
             for p in products:
                 writer.writerow([
                     p.name,
@@ -512,7 +557,8 @@ def _write_products_csv(filepath, products):
                     p.discount_threshold if p.discount_threshold is not None else '',
                     p.selector,
                     'true' if p.enabled else 'false',
-                    p.notification_cooldown_hours
+                    p.notification_cooldown_hours,
+                    p.selector_source if p.selector_source else ''
                 ])
     finally:
         lock.release()

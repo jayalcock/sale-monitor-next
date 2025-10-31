@@ -40,7 +40,7 @@ def read_products(csv_path: str) -> List[Product]:
     products: List[Product] = []
     with path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        required = {"name", "url", "selector"}
+        required = {"name", "url"}
         missing = required - set(reader.fieldnames or [])
         if missing:
             raise ValueError(f"CSV is missing required columns: {', '.join(sorted(missing))}")
@@ -49,11 +49,12 @@ def read_products(csv_path: str) -> List[Product]:
             product = Product(
                 name=row["name"].strip(),
                 url=row["url"].strip(),
-                selector=row["selector"].strip(),
+                selector=row.get("selector", "").strip(),
                 target_price=_parse_float(row.get("target_price")),
                 discount_threshold=_parse_float(row.get("discount_threshold")),
                 enabled=_parse_bool(row.get("enabled", "true")),
                 notification_cooldown_hours=_parse_int(row.get("notification_cooldown_hours"), 24),
+                selector_source=row.get("selector_source", "").strip() or None,
             )
             products.append(product)
     return products

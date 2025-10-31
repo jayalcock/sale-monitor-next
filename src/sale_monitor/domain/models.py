@@ -13,5 +13,6 @@ class Product:
     enabled: bool = True
     notification_cooldown_hours: int = 24
     current_price: Optional[float] = None
+    selector_source: Optional[str] = None  # 'manual', 'auto', 'bookmarklet'
 
 # Additional models can be defined here as needed for future expansion.

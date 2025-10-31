@@ -136,7 +136,7 @@ def test_product_toggle_update_delete(tmp_path):
     assert dele2.status_code == 404
 
 
-@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=9.99)
+@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=(9.99, 'manual'))
 def test_manual_check_updates_state_and_history(_mock_extract, tmp_path):
     client = make_client(tmp_path)
     r = client.post("/api/product/check", json={"url": "https://example.com/w"})
@@ -159,12 +159,12 @@ def test_stats_shape_with_history(tmp_path):
     # Populate history by mocking two manual checks
     with patch(
         "sale_monitor.services.price_extractor.PriceExtractor.extract_price",
-        return_value=10.0,
+        return_value=(10.0, 'manual'),
     ):
         client.post("/api/product/check", json={"url": "https://example.com/w"})
     with patch(
         "sale_monitor.services.price_extractor.PriceExtractor.extract_price",
-        return_value=8.0,
+        return_value=(8.0, 'manual'),
     ):
         client.post("/api/product/check", json={"url": "https://example.com/w"})
 
@@ -208,7 +208,7 @@ def test_alerts_target_met(tmp_path):
     assert any(a["url"] == "https://example.com/w" and a["alert_type"] == "target_met" for a in alerts)
 
 
-@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=11.11)
+@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=(11.11, 'manual'))
 def test_history_all_endpoint(_mock_extract, tmp_path):
     client = make_client(tmp_path)
     # create one history point
@@ -221,7 +221,7 @@ def test_history_all_endpoint(_mock_extract, tmp_path):
     assert any(item["url"] == "https://example.com/w" and len(item.get("series", [])) >= 1 for item in body)
 
 
-@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=5.55)
+@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=(5.55, 'manual'))
 def test_history_all_deduplicates_by_url(_mock_extract, tmp_path):
     client = make_client(tmp_path)
     url = "https://example.com/w"

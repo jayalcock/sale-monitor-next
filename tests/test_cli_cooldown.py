@@ -50,7 +50,7 @@ def test_first_notification_sent(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price.return_value = 95.0
+    mock_extractor.return_value.extract_price.return_value = (95.0, 'manual')
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -78,7 +78,7 @@ def test_cooldown_suppression_same_price(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price.return_value = 95.0
+    mock_extractor.return_value.extract_price.return_value = (95.0, 'manual')
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -118,7 +118,7 @@ def test_cooldown_expiry_sends_notification(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price.return_value = 95.0
+    mock_extractor.return_value.extract_price.return_value = (95.0, 'manual')
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -167,7 +167,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
     # First run - price at 95.0
-    mock_extractor.return_value.extract_price.return_value = 95.0
+    mock_extractor.return_value.extract_price.return_value = (95.0, 'manual')
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
@@ -178,7 +178,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     mock_send.reset_mock()
     
     # Second run - 1 hour later, price drops to 85.0 (within cooldown but different price)
-    mock_extractor.return_value.extract_price.return_value = 85.0
+    mock_extractor.return_value.extract_price.return_value = (85.0, 'manual')
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
@@ -200,7 +200,7 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price.return_value = 95.0
+    mock_extractor.return_value.extract_price.return_value = (95.0, 'manual')
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -258,7 +258,7 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     mock_history.return_value.cleanup_old_records.return_value = 0
     
     # Both products at target price
-    mock_extractor.return_value.extract_price.side_effect = [95.0, 95.0]
+    mock_extractor.return_value.extract_price.side_effect = [(95.0, 'manual'), (95.0, 'manual')]
     
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
@@ -273,7 +273,7 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     mock_send.reset_mock()
     
     # Second run - 1 hour later, Product A changes price, Product B same
-    mock_extractor.return_value.extract_price.side_effect = [85.0, 95.0]
+    mock_extractor.return_value.extract_price.side_effect = [(85.0, 'manual'), (95.0, 'manual')]
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
