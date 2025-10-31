@@ -140,7 +140,8 @@ function loadStats(url) {
 }
 
 function loadHistory(url) {
-    fetch(`/api/product/history?url=${encodeURIComponent(url)}&days=30`)
+    const days = 30;
+    fetch(`/api/product/history?url=${encodeURIComponent(url)}&days=${days}`)
         .then(response => {
             if (!response.ok) throw new Error('Failed to fetch history');
             return response.json();
@@ -151,14 +152,60 @@ function loadHistory(url) {
                     '<p class="text-muted">No price history available yet.</p>');
                 return;
             }
-            
-            const ctx = document.getElementById('price-chart').getContext('2d');
-            
-            const labels = history.map(h => {
+
+            // Build day -> latest price map
+            const dayMap = {};
+            history.forEach(h => {
                 const d = parseUtcIso(h.timestamp);
-                return d ? d.toLocaleDateString() : '';
+                if (!d) return;
+                const key = d.toISOString().slice(0,10);
+                dayMap[key] = h.price;
             });
-            const prices = history.map(h => h.price);
+
+            // Build last N days array (local labels, ISO keys for lookup)
+            const daysArr = [];
+            const dayKeys = [];
+            for (let i = days - 1; i >= 0; i--) {
+                const local = new Date();
+                local.setHours(0,0,0,0);
+                local.setDate(local.getDate() - i);
+                // Normalize to UTC midnight for a stable ISO date key
+                const utcMidnight = new Date(Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()));
+                daysArr.push(local);
+                dayKeys.push(utcMidnight.toISOString().slice(0,10));
+            }
+
+            // Start with known values, null where missing
+            const values = dayKeys.map(k => (k in dayMap ? Number(dayMap[k]) : null));
+
+            // Linear interpolate between known points
+            let lastIdx = null;
+            for (let i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    if (lastIdx != null && i - lastIdx > 1) {
+                        const startVal = values[lastIdx];
+                        const endVal = values[i];
+                        const span = i - lastIdx;
+                        for (let j = lastIdx + 1; j < i; j++) {
+                            const t = (j - lastIdx) / span;
+                            values[j] = startVal + (endVal - startVal) * t;
+                        }
+                    }
+                    lastIdx = i;
+                }
+            }
+
+            // Carry forward last known value to today to avoid trailing gaps
+            if (lastIdx != null) {
+                for (let j = lastIdx + 1; j < values.length; j++) {
+                    values[j] = values[lastIdx];
+                }
+            }
+
+            const labels = daysArr.map(d => d.toLocaleDateString());
+            const prices = values;
+
+            const ctx = document.getElementById('price-chart').getContext('2d');
             
             if (chart) chart.destroy();
             
@@ -171,7 +218,7 @@ function loadHistory(url) {
                         data: prices,
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
+                        tension: 0.15,
                         fill: true
                     }]
                 },
