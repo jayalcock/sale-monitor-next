@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Product Dashboard</h1>
+        <p class="text-muted">Auto-refreshes every 60 seconds</p>
+    </div>
+</div>
+
+<div id="loading" class="text-center my-5">
+    <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+
+<div id="products-container" class="row g-4" style="display: none;">
+    <!-- Products will be inserted here -->
+</div>
+
+<div id="error-alert" class="alert alert-danger" role="alert" style="display: none;">
+    <strong>Error:</strong> <span id="error-message"></span>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let refreshInterval;
+
+function formatPrice(price) {
+    if (price === null || price === undefined) {
+        return '<span class="text-muted">N/A</span>';
+    }
+    return `$${parseFloat(price).toFixed(2)}`;
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '<span class="text-muted">Never</span>';
+    const date = new Date(dateStr);
+    return date.toLocaleString();
+}
+
+function getPriceStatus(product) {
+    if (!product.current_price) return 'unknown';
+    
+    const current = parseFloat(product.current_price);
+    
+    if (product.target_price && current <= product.target_price) {
+        return 'target-met';
+    }
+    
+    if (product.discount_threshold && product.last_price) {
+        const last = parseFloat(product.last_price);
+        const drop = ((last - current) / last) * 100;
+        if (drop >= product.discount_threshold) {
+            return 'discount-met';
+        }
+    }
+    
+    return 'normal';
+}
+
+function getStatusBadge(status) {
+    const badges = {
+        'target-met': '<span class="badge bg-success">🎯 Target Met</span>',
+        'discount-met': '<span class="badge bg-warning text-dark">📉 Big Discount</span>',
+        'normal': '<span class="badge bg-secondary">Watching</span>',
+        'unknown': '<span class="badge bg-light text-dark">No Data</span>'
+    };
+    return badges[status] || badges.unknown;
+}
+
+function renderProduct(product) {
+    const status = getPriceStatus(product);
+    const statusBadge = getStatusBadge(status);
+    const enabledBadge = product.enabled 
+        ? '<span class="badge bg-success">Enabled</span>' 
+        : '<span class="badge bg-secondary">Disabled</span>';
+    
+    // Create URL parameter for history page
+    const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
+    
+    return `
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 ${status === 'target-met' ? 'border-success' : status === 'discount-met' ? 'border-warning' : ''}">
+                <div class="card-body">
+                    <h5 class="card-title">${product.name}</h5>
+                    <p class="card-text">
+                        <strong>Current:</strong> ${formatPrice(product.current_price)}<br>
+                        <strong>Target:</strong> ${formatPrice(product.target_price)}<br>
+                        <strong>Threshold:</strong> ${product.discount_threshold}%<br>
+                        <strong>Last Check:</strong> ${formatDate(product.last_checked)}
+                    </p>
+                    <div class="mb-2">
+                        ${statusBadge} ${enabledBadge}
+                    </div>
+                    <a href="${historyUrl}" class="btn btn-sm btn-primary">View History</a>
+                    <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">Open Product</a>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function loadProducts() {
+    fetch('/api/products')
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch products');
+            return response.json();
+        })
+        .then(products => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-alert').style.display = 'none';
+            
+            const container = document.getElementById('products-container');
+            container.style.display = 'flex';
+            
+            if (products.length === 0) {
+                container.innerHTML = '<div class="col-12"><div class="alert alert-info">No products found. Add products to data/products.csv to get started.</div></div>';
+            } else {
+                container.innerHTML = products.map(renderProduct).join('');
+            }
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-message').textContent = error.message;
+            document.getElementById('error-alert').style.display = 'block';
+        });
+}
+
+// Initial load
+loadProducts();
+
+// Auto-refresh every 60 seconds
+refreshInterval = setInterval(loadProducts, 60000);
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (refreshInterval) clearInterval(refreshInterval);
+});
+</script>
+{% endblock %}

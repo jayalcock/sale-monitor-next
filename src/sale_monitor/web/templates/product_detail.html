@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Product Details - Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <a href="/" class="btn btn-secondary">&larr; Back to Dashboard</a>
+    </div>
+</div>
+
+<div id="loading" class="text-center my-5">
+    <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+
+<div id="product-detail" style="display: none;">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 id="product-name">Product Details</h1>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Current Status</h5>
+                    <div id="current-status">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Statistics (Last 30 Days)</h5>
+                    <div id="stats-content">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Price History</h5>
+                    <canvas id="price-chart" style="max-height: 400px;"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="error-alert" class="alert alert-danger" role="alert" style="display: none;">
+    <strong>Error:</strong> <span id="error-message"></span>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let chart = null;
+let refreshInterval;
+
+function getUrlParameter(name) {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(name);
+}
+
+function formatPrice(price) {
+    if (price === null || price === undefined) {
+        return 'N/A';
+    }
+    return `$${parseFloat(price).toFixed(2)}`;
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return 'Never';
+    const date = new Date(dateStr);
+    return date.toLocaleString();
+}
+
+function loadProductInfo(url) {
+    fetch(`/api/products`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch product info');
+            return response.json();
+        })
+        .then(products => {
+            const product = products.find(p => p.url === url);
+            if (!product) throw new Error('Product not found');
+            
+            document.getElementById('product-name').textContent = product.name;
+            
+            const statusHtml = `
+                <p><strong>Current Price:</strong> ${formatPrice(product.current_price)}</p>
+                <p><strong>Target Price:</strong> ${formatPrice(product.target_price)}</p>
+                <p><strong>Discount Threshold:</strong> ${product.discount_threshold}%</p>
+                <p><strong>Last Checked:</strong> ${formatDate(product.last_checked)}</p>
+                <p><strong>Status:</strong> <span class="badge ${product.enabled ? 'bg-success' : 'bg-secondary'}">${product.enabled ? 'Enabled' : 'Disabled'}</span></p>
+                <p><a href="${product.url}" target="_blank" class="btn btn-sm btn-primary">View Product Page</a></p>
+            `;
+            document.getElementById('current-status').innerHTML = statusHtml;
+        });
+}
+
+function loadStats(url) {
+    fetch(`/api/product/stats?url=${encodeURIComponent(url)}&days=30`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch stats');
+            return response.json();
+        })
+        .then(stats => {
+            const statsHtml = `
+                <p><strong>Checks:</strong> ${stats.total_checks}</p>
+                <p><strong>Lowest:</strong> ${formatPrice(stats.min_price)}</p>
+                <p><strong>Highest:</strong> ${formatPrice(stats.max_price)}</p>
+                <p><strong>Average:</strong> ${formatPrice(stats.avg_price)}</p>
+                <p><strong>First Check:</strong> ${formatDate(stats.first_check)}</p>
+                <p><strong>Latest Check:</strong> ${formatDate(stats.latest_check)}</p>
+            `;
+            document.getElementById('stats-content').innerHTML = statsHtml;
+        })
+        .catch(error => {
+            document.getElementById('stats-content').innerHTML = '<p class="text-muted">No statistics available</p>';
+        });
+}
+
+function loadHistory(url) {
+    fetch(`/api/product/history?url=${encodeURIComponent(url)}&days=30`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch history');
+            return response.json();
+        })
+        .then(history => {
+            if (history.length === 0) {
+                document.getElementById('price-chart').insertAdjacentHTML('beforebegin', 
+                    '<p class="text-muted">No price history available yet.</p>');
+                return;
+            }
+            
+            const ctx = document.getElementById('price-chart').getContext('2d');
+            
+            const labels = history.map(h => new Date(h.timestamp).toLocaleDateString());
+            const prices = history.map(h => h.price);
+            
+            if (chart) chart.destroy();
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Price',
+                        data: prices,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+}
+
+function loadData() {
+    const url = getUrlParameter('url');
+    if (!url) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error-message').textContent = 'No product URL specified';
+        document.getElementById('error-alert').style.display = 'block';
+        return;
+    }
+    
+    Promise.all([
+        loadProductInfo(url),
+        loadStats(url),
+        loadHistory(url)
+    ])
+    .then(() => {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('product-detail').style.display = 'block';
+    })
+    .catch(error => {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error-message').textContent = error.message;
+        document.getElementById('error-alert').style.display = 'block';
+    });
+}
+
+// Initial load
+loadData();
+
+// Auto-refresh every 60 seconds
+refreshInterval = setInterval(loadData, 60000);
+
+// Cleanup
+window.addEventListener('beforeunload', () => {
+    if (refreshInterval) clearInterval(refreshInterval);
+    if (chart) chart.destroy();
+});
+</script>
+{% endblock %}

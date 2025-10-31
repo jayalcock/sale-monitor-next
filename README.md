@@ -10,6 +10,7 @@ A Python application that monitors product prices from online retailers and send
 - **Intelligent cooldown** - Notifies on price changes even during cooldown window
 - **Price history tracking** - SQLite database stores all price checks with configurable retention
 - **Continuous monitoring** - Scheduled checks at configurable intervals (minutes/hours/seconds)
+- **Web dashboard** - Real-time monitoring at http://localhost:5000 with auto-refresh
 - **Docker support** - Ready-to-deploy with docker-compose
 
 ### Query & Analysis
@@ -17,6 +18,7 @@ A Python application that monitors product prices from online retailers and send
 - **Show history** - View price history for specific products
 - **Statistics** - Min/max/average prices, check counts
 - **CSV export** - Export all history data
+- **Price charts** - Visual price trends in web dashboard
 
 ## Quick Start
 
@@ -67,6 +69,21 @@ docker compose restart
 ```
 
 ## Usage
+
+### Web Dashboard
+
+**Start the web server:**
+```bash
+PYTHONPATH=src python -m sale_monitor.web.app
+```
+
+Open http://localhost:5000 in your browser to:
+- View all products with current prices and status
+- See price history charts for each product
+- Monitor targets and discount thresholds
+- Auto-refreshes every 60 seconds
+
+The dashboard reads from `data/products.csv` and `data/state.json`, displaying real-time price data.
 
 ### Price Monitoring
 
