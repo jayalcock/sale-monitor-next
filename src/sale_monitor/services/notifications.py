@@ -1,62 +1,64 @@
-from typing import Dict, Optional
-import os
 import smtplib
-from email.mime.text import MIMEText
+import ssl
+from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
-import logging
+from email.mime.text import MIMEText
+from typing import Optional
+
+
+@dataclass
+class SmtpConfig:
+    server: str
+    port: int
+    username: str
+    password: str
+    from_email: str
+    to_email: str
+    enable: bool = True
+    use_starttls: bool = True
+
 
 class NotificationManager:
-    """Handles sending notifications via email."""
-    
-    def __init__(self, config: Dict):
+    def __init__(self, config: SmtpConfig):
         self.config = config
-    
-    def send_sale_notification(self, product_name: str, current_price: float, old_price: Optional[float] = None):
-        """Send notification about a product going on sale via email."""
-        self._send_email_notification(product_name, current_price, old_price)
-    
-    def _send_email_notification(self, product_name: str, current_price: float, old_price: Optional[float] = None):
-        """Send email notification using environment variables."""
-        smtp_server = os.getenv('SMTP_SERVER')
-        smtp_port = int(os.getenv('SMTP_PORT', 587))
-        smtp_username = os.getenv('SMTP_USERNAME')
-        smtp_password = os.getenv('SMTP_PASSWORD')
-        recipient_email = os.getenv('RECIPIENT_EMAIL', smtp_username)
-        
-        if not all([smtp_server, smtp_username, smtp_password]):
-            logging.error("Email configuration missing. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD environment variables.")
+
+    def send_sale_notification(
+        self,
+        product_name: str,
+        product_url: str,
+        current_price: float,
+        old_price: Optional[float] = None,
+        target_price: Optional[float] = None,
+        triggered_by: str = "target",
+    ) -> None:
+        if not self.config.enable:
             return
-        
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = smtp_username
-            msg['To'] = recipient_email
-            msg['Subject'] = f"Sale Alert: {product_name}"
-            
-            if old_price is not None:
-                discount = ((old_price - current_price) / old_price) * 100
-                body = f"""
-                Great news! The price of {product_name} has dropped!
-                
-                Previous price: ${old_price:.2f}
-                Current price: ${current_price:.2f}
-                Discount: {discount:.1f}%
-                
-                Happy shopping!
-                """
-            else:
-                body = f"""
-                {product_name} is now available at ${current_price:.2f}
-                """
-            
-            msg.attach(MIMEText(body, 'plain'))
-            
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg)
-            
-            logging.info(f"Email notification sent for {product_name}")
-        
-        except Exception as e:
-            logging.error(f"Failed to send email notification: {e}")
+
+        subject = f"Sale Monitor: {product_name} at ${current_price:.2f}"
+        lines = [
+            f"Product: {product_name}",
+            f"URL: {product_url}",
+            f"Current Price: ${current_price:.2f}",
+        ]
+        if old_price is not None:
+            lines.append(f"Previous Price: ${old_price:.2f}")
+            delta = current_price - old_price
+            lines.append(f"Change: {'-' if delta < 0 else '+'}${abs(delta):.2f}")
+        if target_price is not None:
+            lines.append(f"Target Price: ${target_price:.2f}")
+        lines.append(f"Trigger: {triggered_by}")
+        body = "\n".join(lines)
+
+        msg = MIMEMultipart()
+        msg["From"] = self.config.from_email
+        msg["To"] = self.config.to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        context = ssl.create_default_context()
+
+        with smtplib.SMTP(self.config.server, self.config.port, timeout=30) as server:
+            if self.config.use_starttls:
+                server.starttls(context=context)
+            server.login(self.config.username, self.config.password)
+            server.sendmail(self.config.from_email, [self.config.to_email], msg.as_string())

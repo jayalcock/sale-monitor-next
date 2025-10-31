@@ -1,5 +1,5 @@
 import pytest
-from src.sale_monitor.services.price_extractor import PriceExtractor
+from sale_monitor.services.price_extractor import PriceExtractor
 
 class TestPriceExtractor:
     @pytest.fixture

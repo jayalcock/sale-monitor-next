@@ -9,64 +9,72 @@ from bs4 import BeautifulSoup
 
 class PriceExtractor:
     """Handles price extraction from web pages."""
-    
+
     def __init__(self, user_agent: str, timeout: int = 30, max_retries: int = 3):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Connection": "keep-alive",
         })
         self.timeout = timeout
         self.max_retries = max_retries
-    
+
     def extract_price(self, url: str, selector: str) -> Optional[float]:
         """Extract price from a webpage using CSS selector."""
         for attempt in range(self.max_retries):
             try:
-                response = self.session.get(url, timeout=self.timeout)
-                response.raise_for_status()
-                
-                soup = BeautifulSoup(response.content, 'html.parser')
-                price_element = soup.select_one(selector)
-                
-                if not price_element:
-                    logging.warning(f"Price element not found with selector: {selector}")
+                resp = self.session.get(url, timeout=self.timeout)
+                if resp.status_code != 200:
+                    logging.warning("GET %s -> %s", url, resp.status_code)
+                    raise requests.RequestException(f"HTTP {resp.status_code}")
+                soup = BeautifulSoup(resp.text, "html.parser")
+                el = soup.select_one(selector)
+                if not el:
+                    logging.warning("Selector not found: %s on %s", selector, url)
                     return None
-                
-                price_text = price_element.get_text(strip=True)
-                return self._parse_price(price_text)
-                
+                text = el.get_text(strip=True)
+                price = self._parse_price(text)
+                if price is not None:
+                    return price
+                logging.warning("Failed to parse price from: %s", text)
             except requests.exceptions.RequestException as e:
-                logging.warning(f"Attempt {attempt + 1} failed for {url}: {e}")
-            
-            if attempt == self.max_retries - 1:
-                logging.error(f"All attempts failed for {url}")
-                return None
-            time.sleep(2 ** attempt)  # Exponential backoff
-        
+                logging.error("Request failed (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+
+            if attempt < self.max_retries - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff
+
         return None
-    
+
     def _parse_price(self, price_text: str) -> Optional[float]:
-        """Parse price from text string."""
-        # Remove common currency symbols and whitespace
-        price_text = re.sub(r'[^\d.,]', '', price_text)
-        
-        # Handle different decimal separators
-        if ',' in price_text and '.' in price_text:
-            # Assume comma is thousands separator
-            price_text = price_text.replace(',', '')
-        elif ',' in price_text:
-            # Could be decimal separator in some locales
-            if price_text.count(',') == 1 and len(price_text.split(',')[1]) <= 2:
-                price_text = price_text.replace(',', '.')
-            else:
-                price_text = price_text.replace(',', '')
-        
+        """Parse numeric price from text, handling common separators."""
+        if not price_text:
+            return None
+
+        # Keep only digits and separators
+        s = re.sub(r"[^\d.,]", "", price_text)
+
+        if not s:
+            return None
+
+        # If both separators exist, assume comma is thousands and dot is decimal (e.g., 1,234.56)
+        if "," in s and "." in s:
+            s = s.replace(",", "")
+            try:
+                return float(s)
+            except ValueError:
+                return None
+        # If only comma exists, treat comma as decimal (e.g., 19,99 -> 19.99)
+        if "," in s and "." not in s:
+            s = s.replace(",", ".")
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        # Plain float with dot or integer
         try:
-            return float(price_text)
+            return float(s)
         except ValueError:
-            logging.error(f"Could not parse price from: {price_text}")
             return None
