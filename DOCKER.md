@@ -2,11 +2,11 @@
 
 ## Overview
 
-The Docker setup includes two services:
-1. **sale-monitor** - Background price monitoring service
-2. **sale-monitor-web** - Web dashboard for managing and viewing products
+The Docker setup uses a single container that runs two processes via supervisord:
+1. **Web (gunicorn)** - Web dashboard for managing and viewing products
+2. **Monitor (scheduler)** - Background price monitoring service
 
-Both services share the same data volume, so changes made in the web UI are immediately reflected in the monitoring service.
+Both processes share the same data volume, so changes made in the web UI are immediately reflected in the monitoring loop.
 
 ## Prerequisites
 - Docker and Docker Compose installed
@@ -83,14 +83,9 @@ docker compose up --build
 
 ## Services Architecture
 
-### sale-monitor (Backend)
-- Runs continuously checking prices every 15 minutes (configurable)
-- Sends email notifications when targets are met
-- Updates `data/state.json` and `data/history.db`
-- No exposed ports (background service)
-
-### sale-monitor-web (Frontend)
-- Flask web application served by gunicorn (container port 5000, exposed on host 5050)
+### Processes
+- Web: Flask app served by gunicorn (container port 5000, exposed on host 5050)
+- Monitor: Python scheduler that checks prices on an interval (default 15 minutes)
 - Real-time dashboard with auto-refresh
 - Product management (add/edit/delete)
 - Price history charts and statistics
@@ -238,7 +233,7 @@ volumes:
 ```
 
 2. **Web runs with gunicorn by default**
-The docker-compose configuration already uses gunicorn for the web service.
+The docker-compose configuration already uses gunicorn for the web process.
 
 3. **Set resource limits**:
 ```yaml
@@ -257,4 +252,4 @@ environment:
 ```
 
 5. **Healthcheck**
-The web service includes a Docker healthcheck that probes the root URL.
+The container includes a Docker healthcheck that probes the web root URL.

@@ -1,5 +1,4 @@
 services:
-  # Background monitoring service
   sale-monitor:
     build:
       context: .
@@ -9,8 +8,11 @@ services:
     env_file:
       - .env
     environment:
-      # These can be overridden in .env file
+      # General
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
+      - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
+      # Email notifications
       - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}
       - SMTP_SERVER=${SMTP_SERVER}
       - SMTP_PORT=${SMTP_PORT:-587}
@@ -18,29 +20,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
       - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
-      - NOTIFICATION_COOLDOWN_HOURS=${NOTIFICATION_COOLDOWN_HOURS:-24}
-      - USER_AGENT=${USER_AGENT:-Mozilla/5.0 (compatible; SaleMonitor/1.0)}
-      - TIMEOUT=${TIMEOUT:-30}
-      - MAX_RETRIES=${MAX_RETRIES:-3}
-      - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
-      - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
-    volumes:
-      # Shared data volume with web dashboard
-      - ./data:/app/data
-      # Development mode: mount source for live updates (optional - remove in production)
-      - ./src:/app/src:ro
-    command: python -m sale_monitor.cli.main --products-csv /app/data/products.csv --state-file /app/data/state.json --every ${CHECK_INTERVAL:-15m}
-  
-  # Web dashboard service
-  sale-monitor-web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: sale-monitor-web
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
+      # Web runtime
       - PRODUCTS_CSV=/app/data/products.csv
       - STATE_FILE=/app/data/state.json
       - HISTORY_DB=/app/data/history.db
@@ -51,15 +31,10 @@ services:
     ports:
       - "5050:5000"
     volumes:
-      # Shared data volume with monitoring service
       - ./data:/app/data
-      # Development mode: mount source for live updates
       - ./src:/app/src:ro
-    command: gunicorn -w 4 -b 0.0.0.0:5000 'sale_monitor.web.app:create_app()'
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:5000/').getcode()<400 else sys.exit(1)"]
       interval: 30s
       timeout: 5s
       retries: 3
-    depends_on:
-      - sale-monitor
