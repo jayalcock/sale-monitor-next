@@ -34,12 +34,9 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your SMTP settings
 
-# Create products CSV
+# Create products CSV (example)
 mkdir -p data
-cat > data/products.csv <<'CSV'
-name,url,target_price,discount_threshold,selector,enabled,notification_cooldown_hours
-Example Product,https://example.com/product,199.99,15,.price-selector,true,24
-CSV
+cp data/products.example.csv data/products.csv
 
 # Run once
 PYTHONPATH=src python -m sale_monitor.cli.main \
@@ -167,8 +164,8 @@ python -m sale_monitor.cli.main --export-csv history_export.csv
 ### Products CSV Format
 
 ```csv
-name,url,target_price,discount_threshold,selector,enabled,notification_cooldown_hours
-Example Product,https://example.com/product,199.99,15,.price-selector,true,24
+name,url,target_price,discount_threshold,selector,enabled,notification_cooldown_hours,selector_source
+Example Product,https://example.com/product,199.99,15,,true,24,
 ```
 
 **Columns:**
@@ -176,9 +173,10 @@ Example Product,https://example.com/product,199.99,15,.price-selector,true,24
 - `url` - Product page URL (required)
 - `target_price` - Notify when price <= this value (optional)
 - `discount_threshold` - Notify when discount >= this % (optional)
-- `selector` - CSS selector for price element (required)
+- `selector` - CSS selector for price element (optional; leave blank to auto-detect)
 - `enabled` - true/false to enable/disable monitoring (default: true)
 - `notification_cooldown_hours` - Hours between notifications (default: 24)
+- `selector_source` - One of `manual`, `auto`, or `bookmarklet` (optional; runtime may override)
 
 ## Project Structure
 ```

@@ -1,3 +1,28 @@
 .conda/
 .env
-.venv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# OS/Editor junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data/state (do not publish)
+data/state.json
+data/history.db
+data/*.db
+data/products.csv
+
+# Build artifacts
+dist/
+build/
