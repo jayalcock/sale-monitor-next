@@ -238,3 +238,25 @@ def test_history_all_deduplicates_by_url(_mock_extract, tmp_path):
     items_for_url = [it for it in data if it["url"] == url]
     assert len(items_for_url) == 1
     assert len(items_for_url[0].get("series", [])) >= 2
+
+def test_price_history_normalize_names(tmp_path):
+    # Setup DB and write rows with wrong names
+    data_dir = tmp_path
+    history_db = data_dir / "history.db"
+    # Lazy import after sys.path modification from conftest using importlib to avoid linter path issues
+    import importlib
+    ph_mod = importlib.import_module('sale_monitor.storage.price_history')
+    ph = ph_mod.PriceHistory(str(history_db))
+
+    url = "https://example.com/wrong"
+    # Record with incorrect numeric name
+    ph.record_price(url, "2124.0", 10.0, status="success")
+    ph.record_price(url, "2124.0", 9.0, status="success")
+
+    # Normalize
+    updated = ph.normalize_names({url: "Correct Name"})
+    assert updated >= 1
+
+    # Verify
+    products = ph.get_all_products()
+    assert any(u == url and n == "Correct Name" for u, n in products)

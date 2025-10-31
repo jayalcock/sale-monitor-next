@@ -223,3 +223,33 @@ class PriceHistory:
             writer = csv.writer(output_stream)
             writer.writerow(['product_name', 'product_url', 'price', 'timestamp', 'status'])
             writer.writerows(cursor)
+
+    def normalize_names(self, name_by_url: dict) -> int:
+        """Normalize product_name values in DB to match provided mapping.
+
+        Args:
+            name_by_url: mapping of product_url -> correct display name (from CSV)
+
+        Returns:
+            The number of rows updated.
+        """
+        if not name_by_url:
+            return 0
+
+        total_updated = 0
+        with sqlite3.connect(self.db_path) as conn:
+            for url, correct_name in name_by_url.items():
+                if not correct_name:
+                    continue
+                cur = conn.execute(
+                    """
+                    UPDATE price_history
+                    SET product_name = ?
+                    WHERE product_url = ? AND product_name <> ?
+                    """,
+                    (correct_name, url, correct_name),
+                )
+                total_updated += cur.rowcount or 0
+            conn.commit()
+
+        return total_updated

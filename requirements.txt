@@ -1,11 +1,33 @@
-Flask==2.2.5
-Werkzeug==2.3.7
-gunicorn==21.2.0
-requests==2.26.0
+astroid==2.8.6
+attrs==25.4.0
 beautifulsoup4==4.10.0
-schedule==1.1.0
-python-dotenv==0.19.2
+certifi==2025.10.5
+charset-normalizer==2.0.12
+click==8.3.0
+Flask @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_c50ajtxqph/croot/flask_1745600729225/work
+gunicorn==21.2.0
+idna==3.11
+iniconfig==2.3.0
+isort==5.13.2
+itsdangerous @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_00jdi1gu23/croot/itsdangerous_1716533346702/work
+Jinja2 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_2cnn4kenrm/croot/jinja2_1741710859444/work
+lazy-object-proxy==1.12.0
+MarkupSafe==3.0.3
+mccabe==0.6.1
+packaging==25.0
+platformdirs==4.5.0
+pluggy==1.6.0
+py==1.11.0
+pylint==2.11.1
 pytest==6.2.5
 pytest-mock==3.6.1
+python-dotenv==0.19.2
+requests==2.26.0
 requests-mock==1.11.0
-pylint==2.11.1
+schedule==1.1.0
+six==1.17.0
+soupsieve==2.8
+toml==0.10.2
+urllib3==1.26.20
+Werkzeug==2.3.7
+wrapt==1.13.3
