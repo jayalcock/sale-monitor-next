@@ -90,7 +90,7 @@ docker compose up --build
 - No exposed ports (background service)
 
 ### sale-monitor-web (Frontend)
-- Flask web application (container port 5000, exposed on host 5050)
+- Flask web application served by gunicorn (container port 5000, exposed on host 5050)
 - Real-time dashboard with auto-refresh
 - Product management (add/edit/delete)
 - Price history charts and statistics
@@ -237,16 +237,8 @@ volumes:
   # Remove: - ./src:/app/src:ro
 ```
 
-2. **Use production WSGI server for web** (instead of Flask dev server):
-```yaml
-sale-monitor-web:
-  command: gunicorn -w 4 -b 0.0.0.0:5000 'sale_monitor.web.app:create_app()'
-```
-
-Add gunicorn to requirements.txt:
-```bash
-echo "gunicorn==21.2.0" >> requirements.txt
-```
+2. **Web runs with gunicorn by default**
+The docker-compose configuration already uses gunicorn for the web service.
 
 3. **Set resource limits**:
 ```yaml
@@ -260,6 +252,9 @@ deploy:
 4. **Use environment-specific configs**:
 ```yaml
 environment:
-  - FLASK_ENV=production
+  - FLASK_DEBUG=0
   - LOG_LEVEL=WARNING
 ```
+
+5. **Healthcheck**
+The web service includes a Docker healthcheck that probes the root URL.
