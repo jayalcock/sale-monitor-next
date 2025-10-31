@@ -24,6 +24,7 @@ services:
       - TIMEOUT=${TIMEOUT:-30}
       - MAX_RETRIES=${MAX_RETRIES:-3}
       - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
+      - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
     volumes:
       # Data persistence: CSV and state.json
       - ./data:/app/data
