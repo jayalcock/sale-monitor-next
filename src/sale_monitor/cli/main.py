@@ -1,4 +1,4 @@
-c#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Sale Monitor CLI - Command-line interface for the Sale Monitor application.
 """
@@ -38,7 +38,7 @@ def main() -> int:
     for p in enabled:
         price = extractor.extract_price(p.url, p.selector)
         if price is None:
-            logging.warning(f"{p.name}: price not found")
+            logging.warning(f"{p.name}: price not found")  
             continue
 
         now = datetime.now().isoformat()
