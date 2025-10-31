@@ -14,6 +14,7 @@ from sale_monitor.storage.json_state import load_state, save_state
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.domain.models import Product
+from sale_monitor.storage.file_lock import FileLock
 
 
 def create_app():
@@ -64,6 +65,7 @@ def create_app():
                     'current_price': state_data.get('current_price'),
                     'target_price': p.target_price,
                     'discount_threshold': p.discount_threshold,
+                    'notification_cooldown_hours': p.notification_cooldown_hours,
                     'last_checked': state_data.get('last_checked'),
                     'last_price': state_data.get('last_price'),
                     'enabled': p.enabled,
@@ -231,15 +233,32 @@ def create_app():
                 if not data.get(field):
                     return jsonify({'error': f'{field} is required'}), 400
             
+            # Parse optional numeric fields safely
+            def _parse_float(val):
+                if val in (None, ''):
+                    return None
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+
+            def _parse_int(val, default=None):
+                if val in (None, ''):
+                    return default
+                try:
+                    return int(val)
+                except (TypeError, ValueError):
+                    return default
+
             # Create product
             new_product = Product(
                 name=data['name'],
                 url=data['url'],
-                target_price=float(data.get('target_price', 0)) if data.get('target_price') else None,
-                discount_threshold=float(data.get('discount_threshold', 0)) if data.get('discount_threshold') else None,
+                target_price=_parse_float(data.get('target_price')),
+                discount_threshold=_parse_float(data.get('discount_threshold')),
                 selector=data['selector'],
                 enabled=data.get('enabled', True),
-                notification_cooldown_hours=int(data.get('notification_cooldown_hours', 24))
+                notification_cooldown_hours=_parse_int(data.get('notification_cooldown_hours'), default=24)
             )
             
             # Read existing products
@@ -256,7 +275,8 @@ def create_app():
             return jsonify({'success': True, 'product': {
                 'name': new_product.name,
                 'url': new_product.url,
-                'enabled': new_product.enabled
+                'enabled': new_product.enabled,
+                'notification_cooldown_hours': new_product.notification_cooldown_hours
             }})
         except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
@@ -277,14 +297,31 @@ def create_app():
             found = False
             for i, p in enumerate(products):
                 if p.url == url:
+                    # Safe parsing helpers
+                    def _parse_float(val, current):
+                        if val in (None, ''):
+                            return current
+                        try:
+                            return float(val)
+                        except (TypeError, ValueError):
+                            return current
+
+                    def _parse_int(val, current):
+                        if val in (None, ''):
+                            return current
+                        try:
+                            return int(val)
+                        except (TypeError, ValueError):
+                            return current
+
                     products[i] = Product(
                         name=data.get('name', p.name),
                         url=url,
-                        target_price=float(data.get('target_price', 0)) if data.get('target_price') else p.target_price,
-                        discount_threshold=float(data.get('discount_threshold', 0)) if data.get('discount_threshold') else p.discount_threshold,
+                        target_price=_parse_float(data.get('target_price'), p.target_price),
+                        discount_threshold=_parse_float(data.get('discount_threshold'), p.discount_threshold),
                         selector=data.get('selector', p.selector),
                         enabled=data.get('enabled', p.enabled),
-                        notification_cooldown_hours=int(data.get('notification_cooldown_hours', p.notification_cooldown_hours))
+                        notification_cooldown_hours=_parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours)
                     )
                     found = True
                     break
@@ -294,7 +331,16 @@ def create_app():
             
             _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
             
-            return jsonify({'success': True})
+            updated = next((pp for pp in products if pp.url == url), None)
+            return jsonify({'success': True, 'product': {
+                'name': updated.name,
+                'url': updated.url,
+                'enabled': updated.enabled,
+                'notification_cooldown_hours': updated.notification_cooldown_hours,
+                'target_price': updated.target_price,
+                'discount_threshold': updated.discount_threshold,
+                'selector': updated.selector
+            }})
         except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
@@ -371,19 +417,24 @@ def create_app():
 
 def _write_products_csv(filepath, products):
     """Helper to write products to CSV file."""
-    with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours'])
-        for p in products:
-            writer.writerow([
-                p.name,
-                p.url,
-                p.target_price if p.target_price else '',
-                p.discount_threshold if p.discount_threshold else '',
-                p.selector,
-                'true' if p.enabled else 'false',
-                p.notification_cooldown_hours
-            ])
+    lock = FileLock(filepath)
+    lock.acquire()
+    try:
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours'])
+            for p in products:
+                writer.writerow([
+                    p.name,
+                    p.url,
+                    p.target_price if p.target_price is not None else '',
+                    p.discount_threshold if p.discount_threshold is not None else '',
+                    p.selector,
+                    'true' if p.enabled else 'false',
+                    p.notification_cooldown_hours
+                ])
+    finally:
+        lock.release()
 
 
 

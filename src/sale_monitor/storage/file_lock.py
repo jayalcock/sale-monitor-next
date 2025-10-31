@@ -1,9 +1,13 @@
+import os
+import time
+
 class FileLock:
     """A simple file locking mechanism to prevent concurrent access."""
 
     def __init__(self, filepath: str):
         self.filepath = filepath
         self.lock_file = f"{filepath}.lock"
+        self.lock_fd = None
 
     def acquire(self):
         """Acquire a lock on the file."""
@@ -18,5 +22,8 @@ class FileLock:
 
     def release(self):
         """Release the lock on the file."""
-        os.close(self.lock_fd)
-        os.remove(self.lock_file)
+        if self.lock_fd is not None:
+            os.close(self.lock_fd)
+            self.lock_fd = None
+        if os.path.exists(self.lock_file):
+            os.remove(self.lock_file)
