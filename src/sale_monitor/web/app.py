@@ -309,7 +309,7 @@ def create_app():
                 url=data['url'],
                 target_price=target_price,
                 discount_threshold=discount_threshold,
-                selector=data['selector'],
+                selector=data.get('selector', ''),  # Default to empty string if not provided
                 enabled=data.get('enabled', True),
                 notification_cooldown_hours=cooldown_hours
             )
