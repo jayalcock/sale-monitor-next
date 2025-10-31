@@ -195,3 +195,31 @@ class PriceHistory:
                 writer = csv.writer(f)
                 writer.writerow(['product_name', 'product_url', 'price', 'timestamp', 'status'])
                 writer.writerows(cursor)
+
+    def export_to_csv_stream(self, output_stream, product_url: Optional[str] = None):
+        """Export history to a CSV stream (file-like object)."""
+        import csv
+        
+        with sqlite3.connect(self.db_path) as conn:
+            if product_url:
+                cursor = conn.execute(
+                    """
+                    SELECT product_name, product_url, price, timestamp, check_status 
+                    FROM price_history 
+                    WHERE product_url = ?
+                    ORDER BY timestamp DESC
+                    """,
+                    (product_url,)
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT product_name, product_url, price, timestamp, check_status 
+                    FROM price_history 
+                    ORDER BY timestamp DESC
+                    """
+                )
+            
+            writer = csv.writer(output_stream)
+            writer.writerow(['product_name', 'product_url', 'price', 'timestamp', 'status'])
+            writer.writerows(cursor)

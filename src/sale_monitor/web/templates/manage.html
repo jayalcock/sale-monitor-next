@@ -204,7 +204,12 @@ function addProduct() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
     .then(result => {
         if (result.error) {
             showError(result.error);
@@ -248,7 +253,12 @@ function updateProduct() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
     .then(result => {
         if (result.error) {
             showError(result.error);
@@ -270,7 +280,12 @@ function deleteProduct(url, name) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
     .then(result => {
         if (result.error) {
             showError(result.error);

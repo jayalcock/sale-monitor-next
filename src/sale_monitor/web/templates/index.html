@@ -149,7 +149,11 @@ function loadProducts() {
         .then(products => {
             allProducts = products;
             document.getElementById('loading').style.display = 'none';
-            document.getElementById('error-alert').style.display = 'none';
+            // Don't hide error-alert if it's currently showing a message
+            const errorAlert = document.getElementById('error-alert');
+            if (errorAlert.style.display !== 'block') {
+                errorAlert.style.display = 'none';
+            }
             
             const container = document.getElementById('products-container');
             container.style.display = 'flex';
@@ -174,15 +178,20 @@ function toggleProduct(url) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
     .then(result => {
         if (result.error) {
-            alert('Error: ' + result.error);
+            showError(result.error);
         } else {
             loadProducts();
         }
     })
-    .catch(error => alert('Error: ' + error.message));
+    .catch(error => showError(error.message));
 }
 
 function checkPrice(url) {
@@ -195,22 +204,50 @@ function checkPrice(url) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
     .then(result => {
         if (result.error) {
-            alert('Error: ' + result.error);
+            showError(result.error);
         } else {
-            alert(`Price updated: $${result.price.toFixed(2)}`);
+            showSuccess(`Price updated: $${result.price.toFixed(2)}`);
             loadProducts();
         }
         btn.disabled = false;
         btn.innerHTML = '🔄 Check';
     })
     .catch(error => {
-        alert('Error: ' + error.message);
+        showError(error.message);
         btn.disabled = false;
         btn.innerHTML = '🔄 Check';
     });
+}
+
+function showError(message) {
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('error-alert').style.display = 'block';
+    document.getElementById('error-alert').className = 'alert alert-danger';
+    setTimeout(() => {
+        document.getElementById('error-alert').style.display = 'none';
+    }, 5000);
+}
+
+function showSuccess(message) {
+    const alertDiv = document.getElementById('error-alert');
+    document.getElementById('error-message').textContent = message;
+    alertDiv.className = 'alert alert-success';
+    alertDiv.style.display = 'block';
+    
+    // Clear any existing timeout
+    if (window.successTimeout) clearTimeout(window.successTimeout);
+    
+    window.successTimeout = setTimeout(() => {
+        alertDiv.style.display = 'none';
+    }, 4000);
 }
 
 // Event listeners for filters

@@ -1,11 +1,10 @@
 """
 Flask web application for Sale Monitor dashboard.
 """
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, Response
 from datetime import datetime
 import os
 import csv
-import tempfile
 import sqlite3
 import requests
 
@@ -233,32 +232,42 @@ def create_app():
                 if not data.get(field):
                     return jsonify({'error': f'{field} is required'}), 400
             
-            # Parse optional numeric fields safely
-            def _parse_float(val):
+            # Parse and validate optional numeric fields
+            def _parse_float(val, field_name):
                 if val in (None, ''):
                     return None
                 try:
                     return float(val)
-                except (TypeError, ValueError):
-                    return None
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'{field_name} must be a valid number') from exc
 
-            def _parse_int(val, default=None):
+            def _parse_int(val, field_name, default=None):
                 if val in (None, ''):
                     return default
                 try:
-                    return int(val)
-                except (TypeError, ValueError):
-                    return default
+                    parsed = int(val)
+                    if parsed < 0:
+                        raise ValueError(f'{field_name} must be a positive number')
+                    return parsed
+                except (TypeError, ValueError) as e:
+                    raise ValueError(f'{field_name} must be a valid positive integer') from e
+
+            try:
+                target_price = _parse_float(data.get('target_price'), 'target_price')
+                discount_threshold = _parse_float(data.get('discount_threshold'), 'discount_threshold')
+                cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), 'notification_cooldown_hours', default=24)
+            except ValueError as ve:
+                return jsonify({'error': str(ve)}), 400
 
             # Create product
             new_product = Product(
                 name=data['name'],
                 url=data['url'],
-                target_price=_parse_float(data.get('target_price')),
-                discount_threshold=_parse_float(data.get('discount_threshold')),
+                target_price=target_price,
+                discount_threshold=discount_threshold,
                 selector=data['selector'],
                 enabled=data.get('enabled', True),
-                notification_cooldown_hours=_parse_int(data.get('notification_cooldown_hours'), default=24)
+                notification_cooldown_hours=cooldown_hours
             )
             
             # Read existing products
@@ -297,31 +306,41 @@ def create_app():
             found = False
             for i, p in enumerate(products):
                 if p.url == url:
-                    # Safe parsing helpers
-                    def _parse_float(val, current):
+                    # Safe parsing helpers with validation
+                    def _parse_float(val, current, field_name):
                         if val in (None, ''):
                             return current
                         try:
                             return float(val)
-                        except (TypeError, ValueError):
-                            return current
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(f'{field_name} must be a valid number') from exc
 
-                    def _parse_int(val, current):
+                    def _parse_int(val, current, field_name):
                         if val in (None, ''):
                             return current
                         try:
-                            return int(val)
-                        except (TypeError, ValueError):
-                            return current
+                            parsed = int(val)
+                            if parsed < 0:
+                                raise ValueError(f'{field_name} must be a positive number')
+                            return parsed
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(f'{field_name} must be a valid positive integer') from exc
+
+                    try:
+                        target_price = _parse_float(data.get('target_price'), p.target_price, 'target_price')
+                        discount_threshold = _parse_float(data.get('discount_threshold'), p.discount_threshold, 'discount_threshold')
+                        cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours, 'notification_cooldown_hours')
+                    except ValueError as ve:
+                        return jsonify({'error': str(ve)}), 400
 
                     products[i] = Product(
                         name=data.get('name', p.name),
                         url=url,
-                        target_price=_parse_float(data.get('target_price'), p.target_price),
-                        discount_threshold=_parse_float(data.get('discount_threshold'), p.discount_threshold),
+                        target_price=target_price,
+                        discount_threshold=discount_threshold,
                         selector=data.get('selector', p.selector),
                         enabled=data.get('enabled', p.enabled),
-                        notification_cooldown_hours=_parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours)
+                        notification_cooldown_hours=cooldown_hours
                     )
                     found = True
                     break
@@ -396,18 +415,21 @@ def create_app():
     def api_export_history():
         """Export all price history as CSV."""
         try:
+            from io import StringIO
+            
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             
-            # Create temporary file
-            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='')
-            history.export_to_csv(temp_file.name)
-            temp_file.close()
+            # Stream CSV directly to avoid temp files
+            output = StringIO()
+            history.export_to_csv_stream(output)
+            output.seek(0)
             
-            return send_file(
-                temp_file.name,
+            return Response(
+                output.getvalue(),
                 mimetype='text/csv',
-                as_attachment=True,
-                download_name=f'price_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                headers={
+                    'Content-Disposition': f'attachment; filename=price_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                }
             )
         except (OSError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
