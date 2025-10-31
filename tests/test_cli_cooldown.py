@@ -24,6 +24,7 @@ def temp_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SMTP_USERNAME", "test@example.com")
     monkeypatch.setenv("SMTP_PASSWORD", "secret")
     monkeypatch.setenv("RECIPIENT_EMAIL", "recipient@example.com")
+    monkeypatch.setenv("CHECK_INTERVAL", "")  # Disable scheduling mode
     
     return {
         "csv_file": str(csv_file),
@@ -54,6 +55,9 @@ def test_first_notification_sent(temp_env, mocker):
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
     
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
+    
     with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
         # Act
         result = main()
@@ -78,6 +82,9 @@ def test_cooldown_suppression_same_price(temp_env, mocker):
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
+    
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
     
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
@@ -116,6 +123,9 @@ def test_cooldown_expiry_sends_notification(temp_env, mocker):
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
     
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
+    
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
     # First run
@@ -150,6 +160,9 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
+    
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
     
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
@@ -191,6 +204,9 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
+    
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
     
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
@@ -237,6 +253,9 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
+    
+    mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
+    mock_history.return_value.cleanup_old_records.return_value = 0
     
     # Both products at target price
     mock_extractor.return_value.extract_price.side_effect = [95.0, 95.0]
