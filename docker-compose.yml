@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     labels:
       - "net.unraid.docker.webui=http://[IP]:[PORT:5050]"
-      - "net.unraid.docker.icon=/mnt/user/appdata/sale-monitor-next/icon.png"
+      - "net.unraid.docker.icon=http://[IP]:[PORT:5050]/static/img/icon.png"
     env_file:
       - .env
     environment:
