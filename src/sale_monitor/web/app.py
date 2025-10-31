@@ -59,6 +59,8 @@ def create_app():
             result = []
             for p in products:
                 state_data = state.get(p.url, {})
+                # Use selector_source from state if available (runtime detection), otherwise from CSV
+                selector_source = state_data.get('selector_source', p.selector_source or '')
                 result.append({
                     'name': p.name,
                     'url': p.url,
@@ -70,6 +72,7 @@ def create_app():
                     'last_price': state_data.get('last_price'),
                     'enabled': p.enabled,
                     'selector': p.selector,
+                    'selector_source': selector_source,
                 })
             
             return jsonify(result)
@@ -236,6 +239,7 @@ def create_app():
             
             successful = 0
             failed = 0
+            updated_products = []
             
             for product in products:
                 try:
@@ -243,17 +247,22 @@ def create_app():
                     price, selector_source = extractor.extract_price(product.url, "")
                     
                     if price is not None and selector_source == 'auto':
-                        # Auto-detection succeeded - update the product
+                        # Auto-detection succeeded - clear selector and mark as auto
+                        product.selector = ''
                         product.selector_source = 'auto'
                         successful += 1
                     else:
+                        # Keep existing product unchanged
                         failed += 1
+                    
+                    updated_products.append(product)
                 except Exception as e:
                     logging.error(f"Auto-detect failed for {product.url}: {e}")
+                    updated_products.append(product)  # Keep original
                     failed += 1
             
             # Write updated products back to CSV
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], updated_products)
             
             return jsonify({
                 'success': True,
