@@ -10,7 +10,7 @@ A Python application that monitors product prices from online retailers and send
 - **Intelligent cooldown** - Notifies on price changes even during cooldown window
 - **Price history tracking** - SQLite database stores all price checks with configurable retention
 - **Continuous monitoring** - Scheduled checks at configurable intervals (minutes/hours/seconds)
-- **Web dashboard** - Real-time monitoring at http://localhost:5000 with auto-refresh
+- **Web dashboard** - Real-time monitoring at http://localhost:5050 (Docker) or http://localhost:5000 (local) with auto-refresh
 - **Docker support** - Ready-to-deploy with docker-compose
 
 ### Query & Analysis

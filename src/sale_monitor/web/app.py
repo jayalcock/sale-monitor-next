@@ -6,6 +6,8 @@ from datetime import datetime
 import os
 import csv
 import tempfile
+import sqlite3
+import requests
 
 from sale_monitor.storage.csv_products import read_products
 from sale_monitor.storage.json_state import load_state, save_state
@@ -16,39 +18,42 @@ from sale_monitor.domain.models import Product
 
 def create_app():
     """Create and configure Flask application."""
-    app = Flask(__name__)
+    flask_app = Flask(__name__)
     
     # Configuration
-    app.config['PRODUCTS_CSV'] = os.getenv('PRODUCTS_CSV', 'data/products.csv')
-    app.config['STATE_FILE'] = os.getenv('STATE_FILE', 'data/state.json')
-    app.config['HISTORY_DB'] = os.getenv('HISTORY_DB', 'data/history.db')
+    flask_app.config['PRODUCTS_CSV'] = os.getenv('PRODUCTS_CSV', 'data/products.csv')
+    flask_app.config['STATE_FILE'] = os.getenv('STATE_FILE', 'data/state.json')
+    flask_app.config['HISTORY_DB'] = os.getenv('HISTORY_DB', 'data/history.db')
+    flask_app.config['USER_AGENT'] = os.getenv('USER_AGENT', 'Mozilla/5.0 (compatible; SaleMonitor/1.0)')
+    flask_app.config['TIMEOUT'] = int(os.getenv('TIMEOUT', '30'))
+    flask_app.config['MAX_RETRIES'] = int(os.getenv('MAX_RETRIES', '3'))
     
-    @app.route('/')
+    @flask_app.route('/')
     def index():
         """Dashboard home page."""
         return render_template('index.html')
     
-    @app.route('/product/detail')
+    @flask_app.route('/product/detail')
     def product_detail():
         """Product detail page with history chart."""
         return render_template('product_detail.html')
     
-    @app.route('/manage')
+    @flask_app.route('/manage')
     def manage():
         """Product management page."""
         return render_template('manage.html')
     
-    @app.route('/alerts')
+    @flask_app.route('/alerts')
     def alerts():
         """Price alerts dashboard page."""
         return render_template('alerts.html')
     
-    @app.route('/api/products')
+    @flask_app.route('/api/products')
     def api_products():
         """Get all products with current state."""
         try:
-            products = read_products(app.config['PRODUCTS_CSV'])
-            state = load_state(app.config['STATE_FILE'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            state = load_state(flask_app.config['STATE_FILE'])
             
             result = []
             for p in products:
@@ -66,10 +71,10 @@ def create_app():
                 })
             
             return jsonify(result)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/history')
+    @flask_app.route('/api/product/history')
     def api_product_history():
         """Get price history for a product."""
         try:
@@ -77,7 +82,7 @@ def create_app():
             if not url:
                 return jsonify({'error': 'URL parameter required'}), 400
             
-            history = PriceHistory(app.config['HISTORY_DB'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
             days = int(request.args.get('days', 30))
             
             records = history.get_history(url, days=days)
@@ -92,10 +97,10 @@ def create_app():
             ]
             
             return jsonify(result)
-        except Exception as e:
+        except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/stats')
+    @flask_app.route('/api/product/stats')
     def api_product_stats():
         """Get statistics for a product."""
         try:
@@ -103,16 +108,16 @@ def create_app():
             if not url:
                 return jsonify({'error': 'URL parameter required'}), 400
             
-            history = PriceHistory(app.config['HISTORY_DB'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
             days = int(request.args.get('days', 30))
             
             stats = history.get_stats(url, days=days)
             
             return jsonify(stats)
-        except Exception as e:
+        except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/toggle', methods=['POST'])
+    @flask_app.route('/api/product/toggle', methods=['POST'])
     def api_toggle_product():
         """Toggle product enabled status."""
         try:
@@ -122,7 +127,7 @@ def create_app():
                 return jsonify({'error': 'URL required'}), 400
             
             # Read all products
-            products = read_products(app.config['PRODUCTS_CSV'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
             
             # Find and toggle the product
             found = False
@@ -137,13 +142,13 @@ def create_app():
                 return jsonify({'error': 'Product not found'}), 404
             
             # Write back to CSV
-            _write_products_csv(app.config['PRODUCTS_CSV'], updated_products)
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], updated_products)
             
             return jsonify({'success': True, 'enabled': [p for p in updated_products if p.url == url][0].enabled})
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/check', methods=['POST'])
+    @flask_app.route('/api/product/check', methods=['POST'])
     def api_check_product():
         """Manually trigger price check for a product."""
         try:
@@ -153,30 +158,34 @@ def create_app():
                 return jsonify({'error': 'URL required'}), 400
             
             # Find product
-            products = read_products(app.config['PRODUCTS_CSV'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
             product = next((p for p in products if p.url == url), None)
             
             if not product:
                 return jsonify({'error': 'Product not found'}), 404
             
             # Extract price
-            extractor = PriceExtractor()
+            extractor = PriceExtractor(
+                user_agent=flask_app.config['USER_AGENT'],
+                timeout=flask_app.config['TIMEOUT'],
+                max_retries=flask_app.config['MAX_RETRIES']
+            )
             price = extractor.extract_price(product.url, product.selector)
             
             if price is None:
                 return jsonify({'error': 'Failed to extract price'}), 500
             
             # Update state
-            state = load_state(app.config['STATE_FILE'])
+            state = load_state(flask_app.config['STATE_FILE'])
             state[url] = {
                 'current_price': price,
                 'last_checked': datetime.now().isoformat(),
                 'last_price': state.get(url, {}).get('current_price', price)
             }
-            save_state(app.config['STATE_FILE'], state)
+            save_state(flask_app.config['STATE_FILE'], state)
             
             # Record in history
-            history = PriceHistory(app.config['HISTORY_DB'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
             history.record_price(url, price, 'manual_check')
             
             return jsonify({
@@ -184,10 +193,10 @@ def create_app():
                 'price': price,
                 'timestamp': state[url]['last_checked']
             })
-        except Exception as e:
+        except (OSError, ValueError, sqlite3.Error, requests.exceptions.RequestException) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/delete', methods=['POST'])
+    @flask_app.route('/api/product/delete', methods=['POST'])
     def api_delete_product():
         """Delete a product."""
         try:
@@ -197,20 +206,20 @@ def create_app():
                 return jsonify({'error': 'URL required'}), 400
             
             # Read and filter products
-            products = read_products(app.config['PRODUCTS_CSV'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
             filtered = [p for p in products if p.url != url]
             
             if len(filtered) == len(products):
                 return jsonify({'error': 'Product not found'}), 404
             
             # Write back
-            _write_products_csv(app.config['PRODUCTS_CSV'], filtered)
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], filtered)
             
             return jsonify({'success': True})
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/add', methods=['POST'])
+    @flask_app.route('/api/product/add', methods=['POST'])
     def api_add_product():
         """Add a new product."""
         try:
@@ -234,7 +243,7 @@ def create_app():
             )
             
             # Read existing products
-            products = read_products(app.config['PRODUCTS_CSV'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
             
             # Check for duplicate URL
             if any(p.url == new_product.url for p in products):
@@ -242,17 +251,17 @@ def create_app():
             
             # Add and save
             products.append(new_product)
-            _write_products_csv(app.config['PRODUCTS_CSV'], products)
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
             
             return jsonify({'success': True, 'product': {
                 'name': new_product.name,
                 'url': new_product.url,
                 'enabled': new_product.enabled
             }})
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/product/update', methods=['POST'])
+    @flask_app.route('/api/product/update', methods=['POST'])
     def api_update_product():
         """Update an existing product."""
         try:
@@ -262,7 +271,7 @@ def create_app():
                 return jsonify({'error': 'URL required'}), 400
             
             # Read products
-            products = read_products(app.config['PRODUCTS_CSV'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
             
             # Find and update
             found = False
@@ -283,18 +292,18 @@ def create_app():
             if not found:
                 return jsonify({'error': 'Product not found'}), 404
             
-            _write_products_csv(app.config['PRODUCTS_CSV'], products)
+            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
             
             return jsonify({'success': True})
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/alerts')
+    @flask_app.route('/api/alerts')
     def api_alerts():
         """Get products that have hit their price targets or discount thresholds."""
         try:
-            products = read_products(app.config['PRODUCTS_CSV'])
-            state = load_state(app.config['STATE_FILE'])
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            state = load_state(flask_app.config['STATE_FILE'])
             
             alerts = []
             for p in products:
@@ -334,14 +343,14 @@ def create_app():
                     })
             
             return jsonify(alerts)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return jsonify({'error': str(e)}), 500
     
-    @app.route('/api/export/history')
+    @flask_app.route('/api/export/history')
     def api_export_history():
         """Export all price history as CSV."""
         try:
-            history = PriceHistory(app.config['HISTORY_DB'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
             
             # Create temporary file
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='')
@@ -354,15 +363,15 @@ def create_app():
                 as_attachment=True,
                 download_name=f'price_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
             )
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     
-    return app
+    return flask_app
 
 
 def _write_products_csv(filepath, products):
     """Helper to write products to CSV file."""
-    with open(filepath, 'w', newline='') as f:
+    with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours'])
         for p in products:
@@ -380,4 +389,6 @@ def _write_products_csv(filepath, products):
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Listen on all interfaces in production (Docker), localhost only in dev
+    host = '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1'
+    app.run(host=host, port=5000, debug=(os.getenv('FLASK_ENV') != 'production'))

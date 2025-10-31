@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+  # Background monitoring service
   sale-monitor:
     build:
       context: .
@@ -26,8 +27,36 @@ services:
       - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
       - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
     volumes:
-      # Data persistence: CSV and state.json
+      # Shared data volume with web dashboard
       - ./data:/app/data
       # Development mode: mount source for live updates (optional - remove in production)
       - ./src:/app/src:ro
     command: python -m sale_monitor.cli.main --products-csv /app/data/products.csv --state-file /app/data/state.json --every ${CHECK_INTERVAL:-15m}
+  
+  # Web dashboard service
+  sale-monitor-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sale-monitor-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PRODUCTS_CSV=/app/data/products.csv
+      - STATE_FILE=/app/data/state.json
+      - HISTORY_DB=/app/data/history.db
+      - FLASK_ENV=production
+      - USER_AGENT=${USER_AGENT:-Mozilla/5.0 (compatible; SaleMonitor/1.0)}
+      - TIMEOUT=${TIMEOUT:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+    ports:
+      - "5050:5000"
+    volumes:
+      # Shared data volume with monitoring service
+      - ./data:/app/data
+      # Development mode: mount source for live updates
+      - ./src:/app/src:ro
+    command: python -m sale_monitor.web.app
+    depends_on:
+      - sale-monitor

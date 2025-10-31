@@ -1,5 +1,13 @@
 # Docker Quick Start Guide
 
+## Overview
+
+The Docker setup includes two services:
+1. **sale-monitor** - Background price monitoring service
+2. **sale-monitor-web** - Web dashboard for managing and viewing products
+
+Both services share the same data volume, so changes made in the web UI are immediately reflected in the monitoring service.
+
 ## Prerequisites
 - Docker and Docker Compose installed
 - `.env` file configured (see `.env` example below)
@@ -27,6 +35,9 @@ CSV
 docker compose up --build
 ```
 
+4. **Access the web dashboard**:
+Open http://localhost:5050 in your browser
+
 ## Usage
 
 ### Run in background (detached mode)
@@ -36,17 +47,32 @@ docker compose up -d
 
 ### View logs
 ```bash
+# Both services
+docker compose logs -f
+
+# Monitoring service only
 docker compose logs -f sale-monitor
+
+# Web dashboard only
+docker compose logs -f sale-monitor-web
 ```
 
-### Stop the container
+### Access web dashboard
+After starting with `docker compose up -d`:
+- Open http://localhost:5050
+- Dashboard: View all products with live prices
+- Alerts: See products hitting targets
+- Manage: Add/edit/delete products via web UI
+- Export: Download price history CSV
+
+### Stop the containers
 ```bash
 docker compose down
 ```
 
-### Restart after updating CSV
+### Restart after updating CSV (or use web UI instead!)
 ```bash
-# After editing data/products.csv locally
+# After editing data/products.csv locally OR via web UI
 docker compose restart
 ```
 
@@ -55,9 +81,34 @@ docker compose restart
 docker compose up --build
 ```
 
+## Services Architecture
+
+### sale-monitor (Backend)
+- Runs continuously checking prices every 15 minutes (configurable)
+- Sends email notifications when targets are met
+- Updates `data/state.json` and `data/history.db`
+- No exposed ports (background service)
+
+### sale-monitor-web (Frontend)
+- Flask web application (container port 5000, exposed on host 5050)
+- Real-time dashboard with auto-refresh
+- Product management (add/edit/delete)
+- Price history charts and statistics
+- Manual price check functionality
+- Export history to CSV
+
+Both services share the `./data` volume for seamless data synchronization.
+
 ## File Sync Workflow
 
-### Local to Server (Mac → Server)
+### Option 1: Use Web UI (Recommended)
+- Access http://localhost:5000/manage
+ - Or http://localhost:5050/manage when running via Docker
+- Add/edit/delete products directly in the browser
+- Changes automatically saved to `data/products.csv`
+- Monitoring service picks up changes on next check
+
+### Option 2: Local to Server (Mac → Server)
 ```bash
 # 1. Edit data/products.csv locally
 vim data/products.csv
@@ -65,11 +116,11 @@ vim data/products.csv
 # 2. Copy to server
 scp data/products.csv user@server:/path/to/sale-monitor-next/data/
 
-# 3. On server, restart container
+# 3. On server, restart containers
 ssh user@server "cd /path/to/sale-monitor-next && docker compose restart"
 ```
 
-### Alternative: Git-based workflow
+### Option 3: Git-based workflow
 ```bash
 # On Mac
 git add data/products.csv
@@ -84,10 +135,16 @@ docker compose restart
 ## Volume Mounts
 
 The docker-compose.yml mounts:
-- `./data:/app/data` - Products CSV and state.json (persistent)
+- `./data:/app/data` - Shared data directory (persistent)
+  - `products.csv` - Product definitions
+  - `state.json` - Current prices and check times
+  - `history.db` - SQLite price history database
 - `./src:/app/src:ro` - Source code (read-only, for development)
 
-The container automatically reads from `/app/data/products.csv` and writes state to `/app/data/state.json`.
+Both containers access the same data volume, enabling:
+- Web UI to modify products.csv
+- Monitoring service to read products.csv and update state
+- Web UI to display current state and history
 
 ## Environment Variables
 
@@ -127,6 +184,18 @@ docker compose logs sale-monitor
 # Check for CSV parsing errors or missing files
 ```
 
+### Web dashboard not accessible
+```bash
+# Check if host port 5050 is already in use
+lsof -i :5050
+
+# Check web service logs
+docker compose logs sale-monitor-web
+
+# Ensure service is running
+docker compose ps
+```
+
 ### CSV not found
 ```bash
 # Ensure data/products.csv exists locally before running
@@ -139,20 +208,58 @@ ls -la data/products.csv
 chmod -R 755 data/
 ```
 
+### Can't add products via web UI
+```bash
+# Check data directory is writable
+ls -la data/
+# Web service needs write access to products.csv
+```
+
 ### Test without Docker first
 ```bash
-# Run locally to verify setup
+# Run monitoring locally
 export PYTHONPATH=src
 python -m sale_monitor.cli.main --products-csv data/products.csv --state-file data/state.json
+
+# Run web dashboard locally
+export PYTHONPATH=src
+python -m sale_monitor.web.app
 ```
 
 ## Production Deployment
 
-For production, remove the source mount from docker-compose.yml:
+For production, consider these changes to docker-compose.yml:
+
+1. **Remove source mount** (bake code into image):
 ```yaml
 volumes:
   - ./data:/app/data
   # Remove: - ./src:/app/src:ro
 ```
 
-This bakes the code into the image at build time instead of mounting it.
+2. **Use production WSGI server for web** (instead of Flask dev server):
+```yaml
+sale-monitor-web:
+  command: gunicorn -w 4 -b 0.0.0.0:5000 'sale_monitor.web.app:create_app()'
+```
+
+Add gunicorn to requirements.txt:
+```bash
+echo "gunicorn==21.2.0" >> requirements.txt
+```
+
+3. **Set resource limits**:
+```yaml
+deploy:
+  resources:
+    limits:
+      cpus: '0.5'
+      memory: 512M
+```
+
+4. **Use environment-specific configs**:
+```yaml
+environment:
+  - FLASK_ENV=production
+  - LOG_LEVEL=WARNING
+```
