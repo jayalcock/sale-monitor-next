@@ -206,3 +206,35 @@ def test_alerts_target_met(tmp_path):
     assert r.status_code == 200
     alerts = r.get_json()
     assert any(a["url"] == "https://example.com/w" and a["alert_type"] == "target_met" for a in alerts)
+
+
+@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=11.11)
+def test_history_all_endpoint(_mock_extract, tmp_path):
+    client = make_client(tmp_path)
+    # create one history point
+    client.post("/api/product/check", json={"url": "https://example.com/w"})
+
+    r = client.get("/api/history/all", query_string={"days": 30})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert isinstance(body, list)
+    assert any(item["url"] == "https://example.com/w" and len(item.get("series", [])) >= 1 for item in body)
+
+
+@patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=5.55)
+def test_history_all_deduplicates_by_url(_mock_extract, tmp_path):
+    client = make_client(tmp_path)
+    url = "https://example.com/w"
+    # first record with initial name
+    client.post("/api/product/check", json={"url": url})
+    # rename product and record again
+    client.post("/api/product/update", json={"url": url, "name": "Widget 2"})
+    client.post("/api/product/check", json={"url": url})
+
+    r = client.get("/api/history/all")
+    assert r.status_code == 200
+    data = r.get_json()
+    # only one dataset for the URL
+    items_for_url = [it for it in data if it["url"] == url]
+    assert len(items_for_url) == 1
+    assert len(items_for_url[0].get("series", [])) >= 2

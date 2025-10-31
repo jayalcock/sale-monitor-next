@@ -433,6 +433,63 @@ def create_app():
             )
         except (OSError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
+
+    @flask_app.route('/api/history/all')
+    def api_history_all():
+        """Get price history time series for all products.
+
+        Query params:
+        - days: int (optional, default 30) number of recent days to include
+        """
+        try:
+            days = int(request.args.get('days', 30))
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            # Prefer names from current products.csv to avoid stale/incorrect names in DB
+            try:
+                current_products = read_products(flask_app.config['PRODUCTS_CSV'])
+                name_by_url = {p.url: p.name for p in current_products}
+            except (OSError, ValueError):
+                name_by_url = {}
+
+            # Get list of products that have any history
+            products = history.get_all_products()  # List[Tuple[url, name]]
+            result = []
+            seen_urls = set()
+
+            for url, name in products:
+                # Deduplicate by URL in case DB has multiple names over time
+                if url in seen_urls:
+                    continue
+                records = history.get_history(url, days=days)
+                if not records:
+                    continue
+                # Choose display name: prefer CSV; else DB unless it looks numeric -> fallback to URL
+                display_name = name_by_url.get(url, name)
+                try:
+                    # If display_name is numeric-like (legacy bug), fallback to CSV or URL
+                    if display_name is not None and str(display_name).strip() != "":
+                        _ = float(str(display_name))
+                        # numeric, so replace
+                        display_name = name_by_url.get(url, url)
+                except ValueError:
+                    pass
+                series = [
+                    { 'timestamp': ts, 'price': price }
+                    for (ts, price, status) in records
+                    if status == 'success'
+                ]
+                if not series:
+                    continue
+                result.append({
+                    'url': url,
+                    'name': display_name,
+                    'series': series
+                })
+                seen_urls.add(url)
+
+            return jsonify(result)
+        except (OSError, ValueError, sqlite3.Error) as e:
+            return jsonify({'error': str(e)}), 500
     
     return flask_app
 
