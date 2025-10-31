@@ -77,11 +77,35 @@ docker compose restart
 PYTHONPATH=src python -m sale_monitor.web.app
 ```
 
-Open http://localhost:5000 in your browser to:
+Open http://localhost:5000 in your browser for:
+
+**Dashboard (/):**
 - View all products with current prices and status
-- See price history charts for each product
-- Monitor targets and discount thresholds
+- Search and filter products by name or status
+- Quick toggle enable/disable monitoring
+- Manual price check button for immediate updates
 - Auto-refreshes every 60 seconds
+
+**Alerts Page (/alerts):**
+- See all products that hit price targets
+- View products with significant discounts
+- Quick "Buy Now" links for deals
+- Auto-refreshes to stay current
+
+**Management Page (/manage):**
+- Add new products with full configuration
+- Edit existing product settings
+- Delete products from monitoring
+- Configure targets, thresholds, and cooldowns
+
+**Product Detail Pages:**
+- Interactive price history charts (30 days)
+- Statistics: min/max/avg prices, check counts
+- Current status and configuration
+
+**Export:**
+- Download complete price history as CSV
+- Accessible from navbar → 📥 Export
 
 The dashboard reads from `data/products.csv` and `data/state.json`, displaying real-time price data.
 
@@ -159,39 +183,58 @@ Example Product,https://example.com/product,199.99,15,.price-selector,true,24
 ## Project Structure
 ```
 sale-monitor-next
-├── src
-│   └── sale_monitor
+├── src/
+│   └── sale_monitor/
 │       ├── __init__.py
-│       ├── domain
-│       │   ├── __init__.py
-│       │   └── models.py
-│       ├── services
-│       │   ├── __init__.py
-│       │   ├── price_extractor.py
-│       │   ├── notifications.py
-│       │   └── scheduler.py
-│       ├── storage
-│       │   ├── __init__.py
-│       │   ├── base.py
-│       │   ├── json_store.py
-│       │   ├── sqlite_store.py
-│       │   └── file_lock.py
-│       ├── cli
+│       ├── cli/
 │       │   ├── __init__.py
 │       │   └── main.py
-│       └── web
+│       ├── domain/
+│       │   ├── __init__.py
+│       │   └── models.py
+│       ├── services/
+│       │   ├── __init__.py
+│       │   ├── notifications.py
+│       │   ├── price_extractor.py
+│       │   └── scheduler.py
+│       ├── storage/
+│       │   ├── __init__.py
+│       │   ├── base.py
+│       │   ├── csv_products.py
+│       │   ├── file_lock.py
+│       │   ├── json_state.py
+│       │   ├── json_store.py
+│       │   ├── price_history.py
+│       │   └── sqlite_store.py
+│       └── web/
 │           ├── __init__.py
 │           ├── app.py
-│           └── routes
-│               ├── __init__.py
-│               └── products.py
-├── tests
-│   └── .gitkeep
-├── data
-│   └── .gitkeep
+│           ├── routes/
+│           │   ├── __init__.py
+│           │   └── products.py
+│           └── templates/
+│               ├── base.html
+│               ├── index.html
+│               └── product_detail.html
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_cli_cooldown.py
+│   ├── test_json_state.py
+│   ├── test_notifications.py
+│   ├── test_price_extractor.py
+│   └── test_price_history.py
+├── data/
+│   ├── products.csv
+│   ├── state.json
+│   └── history.db
 ├── .env.example
 ├── .gitignore
+├── docker-compose.yml
+├── DOCKER.md
+├── Dockerfile
 ├── pyproject.toml
+├── pytest.ini
 ├── requirements.txt
 └── README.md
 ```

@@ -1,13 +1,17 @@
 """
 Flask web application for Sale Monitor dashboard.
 """
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from datetime import datetime
 import os
+import csv
+import tempfile
 
 from sale_monitor.storage.csv_products import read_products
-from sale_monitor.storage.json_state import load_state
+from sale_monitor.storage.json_state import load_state, save_state
 from sale_monitor.storage.price_history import PriceHistory
+from sale_monitor.services.price_extractor import PriceExtractor
+from sale_monitor.domain.models import Product
 
 
 def create_app():
@@ -28,6 +32,16 @@ def create_app():
     def product_detail():
         """Product detail page with history chart."""
         return render_template('product_detail.html')
+    
+    @app.route('/manage')
+    def manage():
+        """Product management page."""
+        return render_template('manage.html')
+    
+    @app.route('/alerts')
+    def alerts():
+        """Price alerts dashboard page."""
+        return render_template('alerts.html')
     
     @app.route('/api/products')
     def api_products():
@@ -98,7 +112,270 @@ def create_app():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/api/product/toggle', methods=['POST'])
+    def api_toggle_product():
+        """Toggle product enabled status."""
+        try:
+            data = request.get_json()
+            url = data.get('url')
+            if not url:
+                return jsonify({'error': 'URL required'}), 400
+            
+            # Read all products
+            products = read_products(app.config['PRODUCTS_CSV'])
+            
+            # Find and toggle the product
+            found = False
+            updated_products = []
+            for p in products:
+                if p.url == url:
+                    p.enabled = not p.enabled
+                    found = True
+                updated_products.append(p)
+            
+            if not found:
+                return jsonify({'error': 'Product not found'}), 404
+            
+            # Write back to CSV
+            _write_products_csv(app.config['PRODUCTS_CSV'], updated_products)
+            
+            return jsonify({'success': True, 'enabled': [p for p in updated_products if p.url == url][0].enabled})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/product/check', methods=['POST'])
+    def api_check_product():
+        """Manually trigger price check for a product."""
+        try:
+            data = request.get_json()
+            url = data.get('url')
+            if not url:
+                return jsonify({'error': 'URL required'}), 400
+            
+            # Find product
+            products = read_products(app.config['PRODUCTS_CSV'])
+            product = next((p for p in products if p.url == url), None)
+            
+            if not product:
+                return jsonify({'error': 'Product not found'}), 404
+            
+            # Extract price
+            extractor = PriceExtractor()
+            price = extractor.extract_price(product.url, product.selector)
+            
+            if price is None:
+                return jsonify({'error': 'Failed to extract price'}), 500
+            
+            # Update state
+            state = load_state(app.config['STATE_FILE'])
+            state[url] = {
+                'current_price': price,
+                'last_checked': datetime.now().isoformat(),
+                'last_price': state.get(url, {}).get('current_price', price)
+            }
+            save_state(app.config['STATE_FILE'], state)
+            
+            # Record in history
+            history = PriceHistory(app.config['HISTORY_DB'])
+            history.record_price(url, price, 'manual_check')
+            
+            return jsonify({
+                'success': True,
+                'price': price,
+                'timestamp': state[url]['last_checked']
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/product/delete', methods=['POST'])
+    def api_delete_product():
+        """Delete a product."""
+        try:
+            data = request.get_json()
+            url = data.get('url')
+            if not url:
+                return jsonify({'error': 'URL required'}), 400
+            
+            # Read and filter products
+            products = read_products(app.config['PRODUCTS_CSV'])
+            filtered = [p for p in products if p.url != url]
+            
+            if len(filtered) == len(products):
+                return jsonify({'error': 'Product not found'}), 404
+            
+            # Write back
+            _write_products_csv(app.config['PRODUCTS_CSV'], filtered)
+            
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/product/add', methods=['POST'])
+    def api_add_product():
+        """Add a new product."""
+        try:
+            data = request.get_json()
+            
+            # Validate required fields
+            required = ['name', 'url', 'selector']
+            for field in required:
+                if not data.get(field):
+                    return jsonify({'error': f'{field} is required'}), 400
+            
+            # Create product
+            new_product = Product(
+                name=data['name'],
+                url=data['url'],
+                target_price=float(data.get('target_price', 0)) if data.get('target_price') else None,
+                discount_threshold=float(data.get('discount_threshold', 0)) if data.get('discount_threshold') else None,
+                selector=data['selector'],
+                enabled=data.get('enabled', True),
+                notification_cooldown_hours=int(data.get('notification_cooldown_hours', 24))
+            )
+            
+            # Read existing products
+            products = read_products(app.config['PRODUCTS_CSV'])
+            
+            # Check for duplicate URL
+            if any(p.url == new_product.url for p in products):
+                return jsonify({'error': 'Product with this URL already exists'}), 400
+            
+            # Add and save
+            products.append(new_product)
+            _write_products_csv(app.config['PRODUCTS_CSV'], products)
+            
+            return jsonify({'success': True, 'product': {
+                'name': new_product.name,
+                'url': new_product.url,
+                'enabled': new_product.enabled
+            }})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/product/update', methods=['POST'])
+    def api_update_product():
+        """Update an existing product."""
+        try:
+            data = request.get_json()
+            url = data.get('url')
+            if not url:
+                return jsonify({'error': 'URL required'}), 400
+            
+            # Read products
+            products = read_products(app.config['PRODUCTS_CSV'])
+            
+            # Find and update
+            found = False
+            for i, p in enumerate(products):
+                if p.url == url:
+                    products[i] = Product(
+                        name=data.get('name', p.name),
+                        url=url,
+                        target_price=float(data.get('target_price', 0)) if data.get('target_price') else p.target_price,
+                        discount_threshold=float(data.get('discount_threshold', 0)) if data.get('discount_threshold') else p.discount_threshold,
+                        selector=data.get('selector', p.selector),
+                        enabled=data.get('enabled', p.enabled),
+                        notification_cooldown_hours=int(data.get('notification_cooldown_hours', p.notification_cooldown_hours))
+                    )
+                    found = True
+                    break
+            
+            if not found:
+                return jsonify({'error': 'Product not found'}), 404
+            
+            _write_products_csv(app.config['PRODUCTS_CSV'], products)
+            
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/alerts')
+    def api_alerts():
+        """Get products that have hit their price targets or discount thresholds."""
+        try:
+            products = read_products(app.config['PRODUCTS_CSV'])
+            state = load_state(app.config['STATE_FILE'])
+            
+            alerts = []
+            for p in products:
+                if not p.enabled:
+                    continue
+                
+                state_data = state.get(p.url, {})
+                current = state_data.get('current_price')
+                last = state_data.get('last_price')
+                
+                if current is None:
+                    continue
+                
+                alert_type = None
+                message = None
+                
+                # Check target price
+                if p.target_price and current <= p.target_price:
+                    alert_type = 'target_met'
+                    message = f'Price ${current:.2f} is at or below target ${p.target_price:.2f}'
+                
+                # Check discount threshold
+                elif p.discount_threshold and last:
+                    discount = ((last - current) / last) * 100
+                    if discount >= p.discount_threshold:
+                        alert_type = 'discount_met'
+                        message = f'Price dropped {discount:.1f}% (${last:.2f} → ${current:.2f})'
+                
+                if alert_type:
+                    alerts.append({
+                        'name': p.name,
+                        'url': p.url,
+                        'current_price': current,
+                        'alert_type': alert_type,
+                        'message': message,
+                        'last_checked': state_data.get('last_checked')
+                    })
+            
+            return jsonify(alerts)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/export/history')
+    def api_export_history():
+        """Export all price history as CSV."""
+        try:
+            history = PriceHistory(app.config['HISTORY_DB'])
+            
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='')
+            history.export_to_csv(temp_file.name)
+            temp_file.close()
+            
+            return send_file(
+                temp_file.name,
+                mimetype='text/csv',
+                as_attachment=True,
+                download_name=f'price_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+            )
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
     return app
+
+
+def _write_products_csv(filepath, products):
+    """Helper to write products to CSV file."""
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours'])
+        for p in products:
+            writer.writerow([
+                p.name,
+                p.url,
+                p.target_price if p.target_price else '',
+                p.discount_threshold if p.discount_threshold else '',
+                p.selector,
+                'true' if p.enabled else 'false',
+                p.notification_cooldown_hours
+            ])
+
 
 
 if __name__ == '__main__':

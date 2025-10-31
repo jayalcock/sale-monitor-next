@@ -6,7 +6,18 @@
 <div class="row">
     <div class="col-12">
         <h1>Product Dashboard</h1>
-        <p class="text-muted">Auto-refreshes every 60 seconds</p>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="text-muted mb-0">Auto-refreshes every 60 seconds</p>
+            <div>
+                <input type="text" id="search-input" class="form-control form-control-sm d-inline-block" style="width: 200px;" placeholder="Search products...">
+                <select id="status-filter" class="form-select form-select-sm d-inline-block ms-2" style="width: 150px;">
+                    <option value="all">All Status</option>
+                    <option value="enabled">Enabled Only</option>
+                    <option value="disabled">Disabled Only</option>
+                    <option value="alerts">Alerts Only</option>
+                </select>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -28,6 +39,7 @@
 {% block extra_scripts %}
 <script>
 let refreshInterval;
+let allProducts = [];
 
 function formatPrice(price) {
     if (price === null || price === undefined) {
@@ -79,11 +91,10 @@ function renderProduct(product) {
         ? '<span class="badge bg-success">Enabled</span>' 
         : '<span class="badge bg-secondary">Disabled</span>';
     
-    // Create URL parameter for history page
     const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
     
     return `
-        <div class="col-md-6 col-lg-4">
+        <div class="col-md-6 col-lg-4" data-product-name="${product.name.toLowerCase()}" data-status="${product.enabled ? 'enabled' : 'disabled'}" data-alert="${status}">
             <div class="card h-100 ${status === 'target-met' ? 'border-success' : status === 'discount-met' ? 'border-warning' : ''}">
                 <div class="card-body">
                     <h5 class="card-title">${product.name}</h5>
@@ -96,12 +107,37 @@ function renderProduct(product) {
                     <div class="mb-2">
                         ${statusBadge} ${enabledBadge}
                     </div>
-                    <a href="${historyUrl}" class="btn btn-sm btn-primary">View History</a>
-                    <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">Open Product</a>
+                    <div class="btn-group w-100 mb-2" role="group">
+                        <a href="${historyUrl}" class="btn btn-sm btn-primary">📊 History</a>
+                        <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">🔗 Open</a>
+                        <button class="btn btn-sm btn-outline-info" onclick="checkPrice('${product.url}')">🔄 Check</button>
+                    </div>
+                    <button class="btn btn-sm ${product.enabled ? 'btn-warning' : 'btn-success'} w-100" onclick="toggleProduct('${product.url}')">
+                        ${product.enabled ? '⏸ Disable' : '▶️ Enable'}
+                    </button>
                 </div>
             </div>
         </div>
     `;
+}
+
+function filterProducts() {
+    const searchTerm = document.getElementById('search-input').value.toLowerCase();
+    const statusFilter = document.getElementById('status-filter').value;
+    
+    document.querySelectorAll('[data-product-name]').forEach(card => {
+        const name = card.getAttribute('data-product-name');
+        const status = card.getAttribute('data-status');
+        const alert = card.getAttribute('data-alert');
+        
+        const matchesSearch = name.includes(searchTerm);
+        const matchesStatus = statusFilter === 'all' || 
+                            (statusFilter === 'enabled' && status === 'enabled') ||
+                            (statusFilter === 'disabled' && status === 'disabled') ||
+                            (statusFilter === 'alerts' && (alert === 'target-met' || alert === 'discount-met'));
+        
+        card.style.display = (matchesSearch && matchesStatus) ? '' : 'none';
+    });
 }
 
 function loadProducts() {
@@ -111,6 +147,7 @@ function loadProducts() {
             return response.json();
         })
         .then(products => {
+            allProducts = products;
             document.getElementById('loading').style.display = 'none';
             document.getElementById('error-alert').style.display = 'none';
             
@@ -118,9 +155,10 @@ function loadProducts() {
             container.style.display = 'flex';
             
             if (products.length === 0) {
-                container.innerHTML = '<div class="col-12"><div class="alert alert-info">No products found. Add products to data/products.csv to get started.</div></div>';
+                container.innerHTML = '<div class="col-12"><div class="alert alert-info">No products found. <a href="/manage">Add products</a> to get started.</div></div>';
             } else {
                 container.innerHTML = products.map(renderProduct).join('');
+                filterProducts();
             }
         })
         .catch(error => {
@@ -129,6 +167,57 @@ function loadProducts() {
             document.getElementById('error-alert').style.display = 'block';
         });
 }
+
+function toggleProduct(url) {
+    fetch('/api/product/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            alert('Error: ' + result.error);
+        } else {
+            loadProducts();
+        }
+    })
+    .catch(error => alert('Error: ' + error.message));
+}
+
+function checkPrice(url) {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Checking...';
+    
+    fetch('/api/product/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            alert('Error: ' + result.error);
+        } else {
+            alert(`Price updated: $${result.price.toFixed(2)}`);
+            loadProducts();
+        }
+        btn.disabled = false;
+        btn.innerHTML = '🔄 Check';
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = '🔄 Check';
+    });
+}
+
+// Event listeners for filters
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('search-input').addEventListener('input', filterProducts);
+    document.getElementById('status-filter').addEventListener('change', filterProducts);
+});
 
 // Initial load
 loadProducts();

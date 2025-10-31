@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Products - Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <h1>Manage Products</h1>
+        <p class="text-muted">Add, edit, or remove products from monitoring</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProductModal">
+            <span>➕</span> Add New Product
+        </button>
+        <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+    </div>
+</div>
+
+<div id="loading" class="text-center my-5">
+    <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+
+<div id="products-table" style="display: none;">
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Target Price</th>
+                    <th>Discount %</th>
+                    <th>Cooldown (hrs)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="products-tbody">
+                <!-- Populated by JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Product Modal -->
+<div class="modal fade" id="addProductModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addProductForm">
+                    <div class="mb-3">
+                        <label class="form-label">Product Name *</label>
+                        <input type="text" class="form-control" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Product URL *</label>
+                        <input type="url" class="form-control" name="url" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">CSS Selector *</label>
+                        <input type="text" class="form-control" name="selector" required>
+                        <div class="form-text">CSS selector for the price element (e.g., .price, #product-price)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Target Price</label>
+                        <input type="number" step="0.01" class="form-control" name="target_price">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Discount Threshold (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="discount_threshold">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notification Cooldown (hours)</label>
+                        <input type="number" class="form-control" name="notification_cooldown_hours" value="24">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" name="enabled" checked>
+                        <label class="form-check-label">Enabled</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addProduct()">Add Product</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Product Modal -->
+<div class="modal fade" id="editProductModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editProductForm">
+                    <input type="hidden" name="url" id="edit-url">
+                    <div class="mb-3">
+                        <label class="form-label">Product Name *</label>
+                        <input type="text" class="form-control" name="name" id="edit-name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">CSS Selector *</label>
+                        <input type="text" class="form-control" name="selector" id="edit-selector" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Target Price</label>
+                        <input type="number" step="0.01" class="form-control" name="target_price" id="edit-target-price">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Discount Threshold (%)</label>
+                        <input type="number" step="0.1" class="form-control" name="discount_threshold" id="edit-discount">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notification Cooldown (hours)</label>
+                        <input type="number" class="form-control" name="notification_cooldown_hours" id="edit-cooldown">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" name="enabled" id="edit-enabled">
+                        <label class="form-check-label">Enabled</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="updateProduct()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="error-alert" class="alert alert-danger mt-3" role="alert" style="display: none;">
+    <strong>Error:</strong> <span id="error-message"></span>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let productsData = [];
+
+function loadProducts() {
+    fetch('/api/products')
+        .then(response => response.json())
+        .then(products => {
+            productsData = products;
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('products-table').style.display = 'block';
+            
+            const tbody = document.getElementById('products-tbody');
+            tbody.innerHTML = products.map(renderProductRow).join('');
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            showError(error.message);
+        });
+}
+
+function renderProductRow(product) {
+    const statusBadge = product.enabled 
+        ? '<span class="badge bg-success">Enabled</span>' 
+        : '<span class="badge bg-secondary">Disabled</span>';
+    
+    return `
+        <tr>
+            <td><strong>${product.name}</strong><br><small class="text-muted">${product.url}</small></td>
+            <td>${statusBadge}</td>
+            <td>${product.target_price ? '$' + parseFloat(product.target_price).toFixed(2) : '-'}</td>
+            <td>${product.discount_threshold ? product.discount_threshold + '%' : '-'}</td>
+            <td>${product.notification_cooldown_hours}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick='editProduct(${JSON.stringify(product)})'>Edit</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${product.url}', '${product.name}')">Delete</button>
+            </td>
+        </tr>
+    `;
+}
+
+function addProduct() {
+    const form = document.getElementById('addProductForm');
+    const formData = new FormData(form);
+    
+    const data = {
+        name: formData.get('name'),
+        url: formData.get('url'),
+        selector: formData.get('selector'),
+        target_price: formData.get('target_price') || null,
+        discount_threshold: formData.get('discount_threshold') || null,
+        notification_cooldown_hours: formData.get('notification_cooldown_hours') || 24,
+        enabled: formData.get('enabled') === 'on'
+    };
+    
+    fetch('/api/product/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            showError(result.error);
+        } else {
+            bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
+            form.reset();
+            loadProducts();
+        }
+    })
+    .catch(error => showError(error.message));
+}
+
+function editProduct(product) {
+    document.getElementById('edit-url').value = product.url;
+    document.getElementById('edit-name').value = product.name;
+    document.getElementById('edit-selector').value = product.selector;
+    document.getElementById('edit-target-price').value = product.target_price || '';
+    document.getElementById('edit-discount').value = product.discount_threshold || '';
+    document.getElementById('edit-cooldown').value = product.notification_cooldown_hours;
+    document.getElementById('edit-enabled').checked = product.enabled;
+    
+    new bootstrap.Modal(document.getElementById('editProductModal')).show();
+}
+
+function updateProduct() {
+    const form = document.getElementById('editProductForm');
+    const formData = new FormData(form);
+    
+    const data = {
+        url: formData.get('url'),
+        name: formData.get('name'),
+        selector: formData.get('selector'),
+        target_price: formData.get('target_price') || null,
+        discount_threshold: formData.get('discount_threshold') || null,
+        notification_cooldown_hours: formData.get('notification_cooldown_hours'),
+        enabled: formData.get('enabled') === 'on'
+    };
+    
+    fetch('/api/product/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            showError(result.error);
+        } else {
+            bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
+            loadProducts();
+        }
+    })
+    .catch(error => showError(error.message));
+}
+
+function deleteProduct(url, name) {
+    if (!confirm(`Are you sure you want to delete "${name}"?`)) {
+        return;
+    }
+    
+    fetch('/api/product/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            showError(result.error);
+        } else {
+            loadProducts();
+        }
+    })
+    .catch(error => showError(error.message));
+}
+
+function showError(message) {
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('error-alert').style.display = 'block';
+    setTimeout(() => {
+        document.getElementById('error-alert').style.display = 'none';
+    }, 5000);
+}
+
+// Load on page load
+loadProducts();
+</script>
+{% endblock %}
