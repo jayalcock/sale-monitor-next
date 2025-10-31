@@ -126,12 +126,10 @@ def main() -> int:
 
             last_notified_price = rec.get("last_notification_price")
 
+            # Suppress only if within cooldown AND price hasn't changed
             if in_cooldown and last_notified_price is not None and float(last_notified_price) == float(price):
                 # Within cooldown and same price as last notification -> skip
                 logging.info(f"{p.name}: notification suppressed (cooldown, same price)")
-                pass
-            elif in_cooldown:
-                logging.info(f"{p.name}: notification suppressed (cooldown)")
                 pass
             else:
                 # Send email
