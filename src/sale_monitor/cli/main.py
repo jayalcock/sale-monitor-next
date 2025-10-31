@@ -5,8 +5,10 @@ Sale Monitor CLI - Command-line interface for the Sale Monitor application.
 import argparse
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
+import schedule
 from dotenv import load_dotenv
 
 from sale_monitor.services.price_extractor import PriceExtractor
@@ -21,41 +23,10 @@ def _str_to_bool(v: str, default: bool = False) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def main() -> int:
-    load_dotenv(override=False)
-
-    parser = argparse.ArgumentParser(description="Sale Monitor - CSV-backed")
-    parser.add_argument("--products-csv", default=os.getenv("PRODUCTS_CSV", "data/products.csv"))
-    parser.add_argument("--state-file", default=os.getenv("STATE_FILE", "data/state.json"))
-    parser.add_argument("--user-agent", default=os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; SaleMonitor/1.0)"))
-    parser.add_argument("--timeout", type=int, default=int(os.getenv("TIMEOUT", "30")))
-    parser.add_argument("--max-retries", type=int, default=int(os.getenv("MAX_RETRIES", "3")))
-    parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
-    # Optional override for default cooldown hours if CSV omits it
-    parser.add_argument("--default-cooldown-hours", type=int, default=int(os.getenv("NOTIFICATION_COOLDOWN_HOURS", "24")))
-    args = parser.parse_args()
-
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
-                        format="%(asctime)s - %(levelname)s - %(message)s")
-
-    # Email configuration
-    smtp_cfg = SmtpConfig(
-        server=os.getenv("SMTP_SERVER", ""),
-        port=int(os.getenv("SMTP_PORT", "587")),
-        username=os.getenv("SMTP_USERNAME", ""),
-        password=os.getenv("SMTP_PASSWORD", ""),
-        from_email=os.getenv("FROM_EMAIL", os.getenv("SMTP_USERNAME", "")),
-        to_email=os.getenv("RECIPIENT_EMAIL", ""),
-        enable=_str_to_bool(os.getenv("ENABLE_EMAIL_NOTIFICATIONS", "false")),
-        use_starttls=_str_to_bool(os.getenv("SMTP_STARTTLS", "true"), True),
-    )
-    notifier = NotificationManager(smtp_cfg)
-
-    # CSV takes precedence; if missing, fail fast to make it explicit
+def check_prices(args, smtp_cfg, notifier, extractor):
+    """Check prices for all products - extracted for scheduling."""
     products = read_products(args.products_csv)
     state = load_state(args.state_file)
-
-    extractor = PriceExtractor(user_agent=args.user_agent, timeout=args.timeout, max_retries=args.max_retries)
 
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products from {args.products_csv}")
@@ -153,6 +124,76 @@ def main() -> int:
 
     save_state(args.state_file, state)
     logging.info(f"Updated {updated} products. State saved to {args.state_file}.")
+    return updated
+
+
+def main() -> int:
+    load_dotenv(override=False)
+
+    parser = argparse.ArgumentParser(description="Sale Monitor - CSV-backed")
+    parser.add_argument("--products-csv", default=os.getenv("PRODUCTS_CSV", "data/products.csv"))
+    parser.add_argument("--state-file", default=os.getenv("STATE_FILE", "data/state.json"))
+    parser.add_argument("--user-agent", default=os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; SaleMonitor/1.0)"))
+    parser.add_argument("--timeout", type=int, default=int(os.getenv("TIMEOUT", "30")))
+    parser.add_argument("--max-retries", type=int, default=int(os.getenv("MAX_RETRIES", "3")))
+    parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
+    parser.add_argument("--default-cooldown-hours", type=int, default=int(os.getenv("NOTIFICATION_COOLDOWN_HOURS", "24")))
+    parser.add_argument("--every", default=os.getenv("CHECK_INTERVAL", ""), 
+                       help="Run continuously at interval (e.g., '15m', '1h', '30s'). Omit for one-time run.")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
+                        format="%(asctime)s - %(levelname)s - %(message)s")
+
+    # Email configuration
+    smtp_cfg = SmtpConfig(
+        server=os.getenv("SMTP_SERVER", ""),
+        port=int(os.getenv("SMTP_PORT", "587")),
+        username=os.getenv("SMTP_USERNAME", ""),
+        password=os.getenv("SMTP_PASSWORD", ""),
+        from_email=os.getenv("FROM_EMAIL", os.getenv("SMTP_USERNAME", "")),
+        to_email=os.getenv("RECIPIENT_EMAIL", ""),
+        enable=_str_to_bool(os.getenv("ENABLE_EMAIL_NOTIFICATIONS", "false")),
+        use_starttls=_str_to_bool(os.getenv("SMTP_STARTTLS", "true"), True),
+    )
+    notifier = NotificationManager(smtp_cfg)
+    extractor = PriceExtractor(user_agent=args.user_agent, timeout=args.timeout, max_retries=args.max_retries)
+
+    # One-time run or scheduled?
+    if not args.every:
+        # One-time check
+        check_prices(args, smtp_cfg, notifier, extractor)
+        return 0
+
+    # Parse interval
+    interval = args.every.strip().lower()
+    if interval.endswith('m'):
+        minutes = int(interval[:-1])
+        schedule.every(minutes).minutes.do(lambda: check_prices(args, smtp_cfg, notifier, extractor))
+        logging.info(f"Scheduler started: checking every {minutes} minute(s)")
+    elif interval.endswith('h'):
+        hours = int(interval[:-1])
+        schedule.every(hours).hours.do(lambda: check_prices(args, smtp_cfg, notifier, extractor))
+        logging.info(f"Scheduler started: checking every {hours} hour(s)")
+    elif interval.endswith('s'):
+        seconds = int(interval[:-1])
+        schedule.every(seconds).seconds.do(lambda: check_prices(args, smtp_cfg, notifier, extractor))
+        logging.info(f"Scheduler started: checking every {seconds} second(s)")
+    else:
+        logging.error(f"Invalid interval format: {interval}. Use format like '15m', '1h', '30s'")
+        return 1
+
+    # Run once immediately, then on schedule
+    check_prices(args, smtp_cfg, notifier, extractor)
+
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Scheduler stopped by user")
+        return 0
+
     return 0
 
 

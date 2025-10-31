@@ -1,14 +1,32 @@
 version: "3.9"
+
 services:
   sale-monitor:
-    build: .
-    command: python -m sale_monitor.cli.main --products-csv /app/data/products.csv --state-file /app/data/state.json
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sale-monitor
+    restart: unless-stopped
     env_file:
       - .env
     environment:
-      - LOG_LEVEL=INFO
+      # These can be overridden in .env file
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - NOTIFICATION_COOLDOWN_HOURS=${NOTIFICATION_COOLDOWN_HOURS:-24}
+      - USER_AGENT=${USER_AGENT:-Mozilla/5.0 (compatible; SaleMonitor/1.0)}
+      - TIMEOUT=${TIMEOUT:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-15m}
     volumes:
+      # Data persistence: CSV and state.json
       - ./data:/app/data
+      # Development mode: mount source for live updates (optional - remove in production)
       - ./src:/app/src:ro
-      - ./requirements.txt:/app/requirements.txt:ro
-    restart: unless-stopped
+    command: python -m sale_monitor.cli.main --products-csv /app/data/products.csv --state-file /app/data/state.json --every ${CHECK_INTERVAL:-15m}
