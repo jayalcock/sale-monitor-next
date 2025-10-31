@@ -1,3 +1,22 @@
+<!--
+ARCHIVED: Card-based dashboard layout
+Date: 31 October 2025
+Reason: Replaced with compact table layout for better scalability with many products
+Original file: src/sale_monitor/web/templates/index.html
+
+This file contains the original card-based product dashboard layout with:
+- Card grid display (col-md-6 col-lg-4)
+- Target price, discount threshold, last checked visible on cards
+- Individual enable/disable buttons per card
+- Status badges (Target Met, Big Discount, Watching)
+
+Replaced with table-based layout featuring:
+- Compact table with sortable columns
+- Product name, current price, status, actions in single row
+- Better scalability for many products
+- Mobile-responsive with dropdown actions
+-->
+
 {% extends "base.html" %}
 
 {% block title %}Dashboard - Sale Monitor{% endblock %}
@@ -40,6 +59,7 @@
             </div>
         </div>
     </div>
+    
 </div>
 
 <div id="loading" class="text-center my-5">
@@ -48,65 +68,13 @@
     </div>
 </div>
 
-<div id="products-table-container" style="display: none;">
-    <div class="card">
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover table-striped align-middle mb-0" id="products-table">
-                    <thead>
-                        <tr>
-                            <th style="cursor: pointer;" onclick="sortTable('name')">
-                                Product <span id="sort-name-icon">⬍</span>
-                            </th>
-                            <th style="cursor: pointer;" onclick="sortTable('price')">
-                                Current Price <span id="sort-price-icon">⬍</span>
-                            </th>
-                            <th>Status</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="products-tbody">
-                        <!-- Products will be inserted here -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="empty-state" class="alert alert-info" style="display: none;">
-    No products found. <a href="/manage">Add products</a> to get started.
+<div id="products-container" class="row g-4" style="display: none;">
+    <!-- Products will be inserted here -->
 </div>
 
 <div id="error-alert" class="alert alert-danger" role="alert" style="display: none;">
     <strong>Error:</strong> <span id="error-message"></span>
 </div>
-
-<style>
-/* Mobile dropdown for actions */
-@media (max-width: 768px) {
-    .action-buttons {
-        display: none;
-    }
-    .action-dropdown {
-        display: inline-block !important;
-    }
-}
-
-@media (min-width: 769px) {
-    .action-dropdown {
-        display: none !important;
-    }
-}
-
-.table th {
-    user-select: none;
-}
-
-.table tbody tr:hover {
-    background-color: rgba(0, 0, 0, 0.075);
-}
-</style>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -114,11 +82,10 @@
 let refreshInterval;
 let trendsChart = null;
 let allProducts = [];
-let sortBy = 'name';
-let sortDesc = false;
 
 function parseUtcIso(dateStr) {
     if (!dateStr) return null;
+    // If string lacks timezone info, treat it as UTC by appending 'Z'
     const hasTz = /[zZ]|[\+\-]\d{2}:?\d{2}$/.test(dateStr);
     const s = hasTz ? dateStr : `${dateStr}Z`;
     const d = new Date(s);
@@ -130,6 +97,12 @@ function formatPrice(price) {
         return '<span class="text-muted">N/A</span>';
     }
     return `$${parseFloat(price).toFixed(2)}`;
+}
+
+function formatDate(dateStr) {
+    const date = parseUtcIso(dateStr);
+    if (!date) return '<span class="text-muted">Never</span>';
+    return date.toLocaleString();
 }
 
 function getPriceStatus(product) {
@@ -162,120 +135,60 @@ function getStatusBadge(status) {
     return badges[status] || badges.unknown;
 }
 
-function getEnabledBadge(enabled) {
-    return enabled 
-        ? '<span class="badge bg-success">Enabled</span>' 
-        : '<span class="badge bg-secondary">Disabled</span>';
-}
-
-function renderProductRow(product) {
+function renderProduct(product) {
     const status = getPriceStatus(product);
     const statusBadge = getStatusBadge(status);
-    const enabledBadge = getEnabledBadge(product.enabled);
+    const enabledBadge = product.enabled 
+        ? '<span class="badge bg-success">Enabled</span>' 
+        : '<span class="badge bg-secondary">Disabled</span>';
+    
     const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
-    const toggleText = product.enabled ? '⏸ Disable' : '▶️ Enable';
-    const toggleClass = product.enabled ? 'btn-warning' : 'btn-success';
     
     return `
-        <tr data-product-name="${product.name.toLowerCase()}" 
-            data-status="${product.enabled ? 'enabled' : 'disabled'}" 
-            data-alert="${status}"
-            data-price="${product.current_price || 0}">
-            <td><strong>${product.name}</strong></td>
-            <td>${formatPrice(product.current_price)}</td>
-            <td>${statusBadge} ${enabledBadge}</td>
-            <td class="text-end">
-                <div class="action-buttons btn-group btn-group-sm" role="group">
-                    <a href="${historyUrl}" class="btn btn-outline-primary">📊 History</a>
-                    <a href="${product.url}" target="_blank" class="btn btn-outline-secondary">🔗 Open</a>
-                    <button class="btn btn-outline-info" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
-                    <button class="btn ${toggleClass}" onclick="toggleProduct('${product.url}', this)">${toggleText}</button>
-                </div>
-                <div class="action-dropdown dropdown" style="display: none;">
-                    <button class="btn btn-sm btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                        Actions
+        <div class="col-md-6 col-lg-4" data-product-name="${product.name.toLowerCase()}" data-status="${product.enabled ? 'enabled' : 'disabled'}" data-alert="${status}">
+            <div class="card h-100 ${status === 'target-met' ? 'border-success' : status === 'discount-met' ? 'border-warning' : ''}">
+                <div class="card-body">
+                    <h5 class="card-title">${product.name}</h5>
+                    <p class="card-text">
+                        <strong>Current:</strong> ${formatPrice(product.current_price)}<br>
+                        <strong>Target:</strong> ${formatPrice(product.target_price)}<br>
+                        <strong>Threshold:</strong> ${product.discount_threshold}%<br>
+                        <strong>Last Check:</strong> ${formatDate(product.last_checked)}
+                    </p>
+                    <div class="mb-2">
+                        ${statusBadge} ${enabledBadge}
+                    </div>
+                    <div class="btn-group w-100 mb-2" role="group">
+                        <a href="${historyUrl}" class="btn btn-sm btn-primary">📊 History</a>
+                        <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">🔗 Open</a>
+                        <button class="btn btn-sm btn-outline-info" onclick="checkPrice('${product.url}')">🔄 Check</button>
+                    </div>
+                    <button class="btn btn-sm ${product.enabled ? 'btn-warning' : 'btn-success'} w-100" onclick="toggleProduct('${product.url}')">
+                        ${product.enabled ? '⏸ Disable' : '▶️ Enable'}
                     </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="${historyUrl}">📊 History</a></li>
-                        <li><a class="dropdown-item" href="${product.url}" target="_blank">🔗 Open</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><button class="dropdown-item" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button></li>
-                        <li><button class="dropdown-item" onclick="toggleProduct('${product.url}', this)">${toggleText}</button></li>
-                    </ul>
                 </div>
-            </td>
-        </tr>
+            </div>
+        </div>
     `;
 }
 
-function sortTable(column) {
-    if (sortBy === column) {
-        sortDesc = !sortDesc;
-    } else {
-        sortBy = column;
-        sortDesc = false;
-    }
-    
-    // Update sort icons
-    document.getElementById('sort-name-icon').textContent = '⬍';
-    document.getElementById('sort-price-icon').textContent = '⬍';
-    
-    const icon = sortDesc ? '▼' : '▲';
-    document.getElementById(`sort-${column}-icon`).textContent = icon;
-    
-    renderProducts();
-}
-
-function filterAndSortProducts() {
+function filterProducts() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
     const statusFilter = document.getElementById('status-filter').value;
     
-    let filtered = allProducts.filter(product => {
-        const status = getPriceStatus(product);
-        const matchesSearch = product.name.toLowerCase().includes(searchTerm);
+    document.querySelectorAll('[data-product-name]').forEach(card => {
+        const name = card.getAttribute('data-product-name');
+        const status = card.getAttribute('data-status');
+        const alert = card.getAttribute('data-alert');
+        
+        const matchesSearch = name.includes(searchTerm);
         const matchesStatus = statusFilter === 'all' || 
-                            (statusFilter === 'enabled' && product.enabled) ||
-                            (statusFilter === 'disabled' && !product.enabled) ||
-                            (statusFilter === 'alerts' && (status === 'target-met' || status === 'discount-met'));
-        return matchesSearch && matchesStatus;
-    });
-    
-    // Sort
-    filtered.sort((a, b) => {
-        let compareA, compareB;
+                            (statusFilter === 'enabled' && status === 'enabled') ||
+                            (statusFilter === 'disabled' && status === 'disabled') ||
+                            (statusFilter === 'alerts' && (alert === 'target-met' || alert === 'discount-met'));
         
-        if (sortBy === 'name') {
-            compareA = a.name.toLowerCase();
-            compareB = b.name.toLowerCase();
-        } else if (sortBy === 'price') {
-            compareA = parseFloat(a.current_price || 0);
-            compareB = parseFloat(b.current_price || 0);
-        }
-        
-        if (compareA < compareB) return sortDesc ? 1 : -1;
-        if (compareA > compareB) return sortDesc ? -1 : 1;
-        return 0;
+        card.style.display = (matchesSearch && matchesStatus) ? '' : 'none';
     });
-    
-    return filtered;
-}
-
-function renderProducts() {
-    const filtered = filterAndSortProducts();
-    const tbody = document.getElementById('products-tbody');
-    
-    if (filtered.length === 0) {
-        document.getElementById('products-table-container').style.display = 'none';
-        document.getElementById('empty-state').style.display = allProducts.length === 0 ? 'block' : 'none';
-        if (allProducts.length > 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No products match your filters.</td></tr>';
-            document.getElementById('products-table-container').style.display = 'block';
-        }
-    } else {
-        document.getElementById('empty-state').style.display = 'none';
-        document.getElementById('products-table-container').style.display = 'block';
-        tbody.innerHTML = filtered.map(renderProductRow).join('');
-    }
 }
 
 function loadProducts() {
@@ -287,7 +200,21 @@ function loadProducts() {
         .then(products => {
             allProducts = products;
             document.getElementById('loading').style.display = 'none';
-            renderProducts();
+            // Don't hide error-alert if it's currently showing a message
+            const errorAlert = document.getElementById('error-alert');
+            if (errorAlert.style.display !== 'block') {
+                errorAlert.style.display = 'none';
+            }
+            
+            const container = document.getElementById('products-container');
+            container.style.display = 'flex';
+            
+            if (products.length === 0) {
+                container.innerHTML = '<div class="col-12"><div class="alert alert-info">No products found. <a href="/manage">Add products</a> to get started.</div></div>';
+            } else {
+                container.innerHTML = products.map(renderProduct).join('');
+                filterProducts();
+            }
         })
         .catch(error => {
             document.getElementById('loading').style.display = 'none';
@@ -301,7 +228,8 @@ function uniq(arr) {
 }
 
 function colorForIndex(i) {
-    const hue = (i * 57) % 360;
+    // Pleasant distinct HSL palette
+    const hue = (i * 57) % 360; // pseudo-random spread
     return `hsl(${hue}, 70%, 50%)`;
 }
 
@@ -323,18 +251,20 @@ function loadTrends() {
             }
             emptyDiv.style.display = 'none';
 
+            // Build a unified set of date labels (by day)
             const allDates = uniq(seriesList.flatMap(item => item.series.map(p => {
                 const d = parseUtcIso(p.timestamp);
                 return d ? d.toISOString().slice(0,10) : null;
             }).filter(Boolean))).sort();
 
             const datasets = seriesList.map((item, idx) => {
+                // Map day -> latest price for that day
                 const dayMap = {};
                 item.series.forEach(p => {
                     const dd = parseUtcIso(p.timestamp);
                     if (!dd) return;
                     const d = dd.toISOString().slice(0,10);
-                    dayMap[d] = p.price;
+                    dayMap[d] = p.price; // latest seen wins
                 });
                 const color = colorForIndex(idx);
                 return {
@@ -383,16 +313,14 @@ function loadTrends() {
             });
         })
         .catch(err => {
+            // Non-fatal for dashboard; show small message in empty area
             const emptyDiv = document.getElementById('trends-empty');
             emptyDiv.textContent = 'Unable to load trends.';
             emptyDiv.style.display = 'block';
         });
 }
 
-function toggleProduct(url, btn) {
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    
+function toggleProduct(url) {
     fetch('/api/product/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -407,20 +335,15 @@ function toggleProduct(url, btn) {
     .then(result => {
         if (result.error) {
             showError(result.error);
-            btn.disabled = false;
         } else {
             loadProducts();
         }
     })
-    .catch(error => {
-        showError(error.message);
-        btn.innerHTML = originalHtml;
-        btn.disabled = false;
-    });
+    .catch(error => showError(error.message));
 }
 
-function checkPrice(url, btn) {
-    const originalHtml = btn.innerHTML;
+function checkPrice(url) {
+    const btn = event.target;
     btn.disabled = true;
     btn.innerHTML = '⏳ Checking...';
     
@@ -443,12 +366,12 @@ function checkPrice(url, btn) {
             loadProducts();
         }
         btn.disabled = false;
-        btn.innerHTML = originalHtml;
+        btn.innerHTML = '🔄 Check';
     })
     .catch(error => {
         showError(error.message);
         btn.disabled = false;
-        btn.innerHTML = originalHtml;
+        btn.innerHTML = '🔄 Check';
     });
 }
 
@@ -467,6 +390,7 @@ function showSuccess(message) {
     alertDiv.className = 'alert alert-success';
     alertDiv.style.display = 'block';
     
+    // Clear any existing timeout
     if (window.successTimeout) clearTimeout(window.successTimeout);
     
     window.successTimeout = setTimeout(() => {
@@ -474,10 +398,10 @@ function showSuccess(message) {
     }, 4000);
 }
 
-// Event listeners
+// Event listeners for filters
 document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('search-input').addEventListener('input', renderProducts);
-    document.getElementById('status-filter').addEventListener('change', renderProducts);
+    document.getElementById('search-input').addEventListener('input', filterProducts);
+    document.getElementById('status-filter').addEventListener('change', filterProducts);
     document.getElementById('trend-days').addEventListener('change', loadTrends);
 });
 
