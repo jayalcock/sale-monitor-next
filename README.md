@@ -186,12 +186,7 @@ sale-monitor-next
 │               ├── __init__.py
 │               └── products.py
 ├── tests
-│   ├── __init__.py
-│   ├── test_storage_json.py
-│   └── test_price_extractor.py
-├── config
-│   ├── config.example.json
-│   └── logging.example.ini
+│   └── .gitkeep
 ├── data
 │   └── .gitkeep
 ├── .env.example
@@ -215,7 +210,7 @@ sale-monitor-next
 
 3. Set up your environment variables by copying `.env.example` to `.env` and filling in the necessary values.
 
-4. Configure the application by copying `config/config.example.json` to `config/config.json` and adjusting the settings as needed.
+4. Create your products CSV file in `data/products.csv` with the products you want to monitor.
 
 ## Usage
 To run the application, use the command line interface:
