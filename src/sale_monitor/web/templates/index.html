@@ -10,15 +10,24 @@
             <div class="d-flex align-items-center gap-3">
                 <p id="last-update" class="text-muted mb-0">Last update: --</p>
                 <button id="update-all-btn" class="btn btn-sm btn-outline-primary" title="Check all enabled products now">🔄 Update All</button>
+                <a href="/manage" class="btn btn-sm btn-success" title="Add new product">➕ Add Product</a>
             </div>
-            <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
                 <input type="text" id="search-input" class="form-control form-control-sm d-inline-block" style="width: 200px;" placeholder="Search products...">
-                <select id="status-filter" class="form-select form-select-sm d-inline-block ms-2" style="width: 150px;">
+                <select id="status-filter" class="form-select form-select-sm d-inline-block" style="width: 150px;">
                     <option value="all">All Status</option>
                     <option value="enabled">Enabled Only</option>
                     <option value="disabled">Disabled Only</option>
                     <option value="alerts">Alerts Only</option>
                 </select>
+                <div class="btn-group btn-group-sm" role="group" aria-label="View toggle">
+                    <button type="button" id="view-table-btn" class="btn btn-outline-secondary" title="Table view">
+                        ☰ Table
+                    </button>
+                    <button type="button" id="view-cards-btn" class="btn btn-outline-secondary" title="Cards view">
+                        ⊞ Cards
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -88,6 +97,12 @@
                 </table>
             </div>
         </div>
+    </div>
+</div>
+
+<div id="products-cards-container" style="display: none;">
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4" id="products-cards">
+        <!-- Cards will be inserted here -->
     </div>
 </div>
 
@@ -195,6 +210,95 @@
 .table tbody tr:hover {
     background-color: rgba(0, 0, 0, 0.075);
 }
+
+/* Cards view styles */
+.product-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+}
+
+.product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.product-card-image-wrapper {
+    width: 100%;
+    height: 180px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+}
+
+.product-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 8px;
+}
+
+.placeholder-image {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+
+.placeholder-image.no-image {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.product-card .card-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.product-card .card-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    min-height: 2.4em;
+    line-height: 1.2em;
+}
+
+.product-card .merchant-link {
+    font-size: 0.85rem;
+    color: #6c757d;
+    text-decoration: none;
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.product-card .merchant-link:hover {
+    text-decoration: underline;
+}
+
+.product-card .price-display {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #198754;
+    margin: 0.5rem 0;
+}
+
+.product-card .card-actions {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(0,0,0,0.1);
+}
+
+#view-table-btn.active,
+#view-cards-btn.active {
+    background-color: #0d6efd;
+    color: white;
+    border-color: #0d6efd;
+}
 </style>
 {% endblock %}
 
@@ -206,6 +310,7 @@ let allProducts = [];
 let CURRENT_BASE_CURRENCY = 'CAD';
 let sortBy = 'name';
 let sortDesc = false;
+let currentView = localStorage.getItem('productView') || 'table';
 
 function getMerchant(product) {
     try {
@@ -282,13 +387,110 @@ function getEnabledBadge(enabled) {
         : '<span class="badge bg-secondary">Disabled</span>';
 }
 
+function renderProductCard(product) {
+    const status = getPriceStatus(product);
+    const statusBadge = getStatusBadge(status);
+    const enabledBadge = getEnabledBadge(product.enabled);
+    const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
+    const merchant = getMerchant(product);
+    
+    return `
+        <div class="col" data-product-name="${product.name.toLowerCase()}" 
+             data-product-url="${encodeURIComponent(product.url)}"
+             data-status="${product.enabled ? 'enabled' : 'disabled'}" 
+             data-alert="${status}"
+             data-price="${product.current_price || 0}"
+             data-merchant="${merchant.toLowerCase()}">
+            <div class="card product-card h-100">
+                <div class="product-card-image-wrapper">
+                    <div class="placeholder-image">
+                        <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="${historyUrl}" class="text-decoration-none text-dark">${product.name}</a>
+                    </h5>
+                    <a href="${product.url}" target="_blank" class="merchant-link">${merchant}</a>
+                    <div class="price-display">${formatPriceCell(product)}</div>
+                    <div class="mb-2">
+                        ${statusBadge}
+                        ${enabledBadge}
+                    </div>
+                    <div class="card-actions">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-sm btn-outline-info" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function loadCardImages() {
+    // Load images for all visible cards
+    const cols = document.querySelectorAll('#products-cards [data-product-url]');
+    console.log('Loading images for', cols.length, 'cards');
+    
+    cols.forEach((col, index) => {
+        const productUrl = decodeURIComponent(col.dataset.productUrl);
+        const wrapper = col.querySelector('.product-card-image-wrapper');
+        
+        console.log('Card', index, 'URL:', productUrl);
+        
+        if (!wrapper || wrapper.dataset.loaded === 'true') {
+            console.log('Skipping card', index, '- wrapper:', !!wrapper, 'loaded:', wrapper?.dataset.loaded);
+            return;
+        }
+        wrapper.dataset.loaded = 'true';
+        
+        // Try to load image
+        const imageUrl = `/api/product/image/file?url=${encodeURIComponent(productUrl)}&w=400&h=200`;
+        console.log('Fetching image:', imageUrl);
+        
+        fetch(imageUrl)
+            .then(r => {
+                console.log('Image response status:', r.status, 'content-type:', r.headers.get('Content-Type'));
+                if (r.ok && r.headers.get('Content-Type')?.startsWith('image/')) {
+                    return r.blob();
+                }
+                throw new Error(`HTTP ${r.status} - Not an image`);
+            })
+            .then(blob => {
+                console.log('Got image blob:', blob.size, 'bytes');
+                const objUrl = URL.createObjectURL(blob);
+                const img = document.createElement('img');
+                img.className = 'product-card-image';
+                img.alt = col.dataset.productName || 'Product image';
+                img.onload = () => {
+                    console.log('Image loaded successfully');
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(img);
+                    URL.revokeObjectURL(objUrl);
+                };
+                img.onerror = (e) => {
+                    console.error('Image element load error:', e);
+                    wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
+                    URL.revokeObjectURL(objUrl);
+                };
+                img.src = objUrl;
+            })
+            .catch((err) => {
+                console.error('Image fetch error:', err);
+                wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
+            });
+    });
+}
+
 function renderProductRow(product) {
     const status = getPriceStatus(product);
     const statusBadge = getStatusBadge(status);
     const enabledBadge = getEnabledBadge(product.enabled);
     const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
-    const toggleText = product.enabled ? '⏸ Disable' : '▶️ Enable';
-    const toggleClass = product.enabled ? 'btn-warning' : 'btn-success';
     const merchant = getMerchant(product);
     
     return `
@@ -304,7 +506,7 @@ function renderProductRow(product) {
             <td class="text-end">
                 <div class="action-buttons btn-group btn-group-sm" role="group">
                     <button class="btn btn-outline-info" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
-                    <button class="btn ${toggleClass}" onclick="toggleProduct('${product.url}', this)">${toggleText}</button>
+                    <button class="btn btn-outline-danger" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
                 <div class="action-dropdown dropdown" style="display: none;">
                     <button class="btn btn-sm btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
@@ -312,7 +514,7 @@ function renderProductRow(product) {
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><button class="dropdown-item" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button></li>
-                        <li><button class="dropdown-item" onclick="toggleProduct('${product.url}', this)">${toggleText}</button></li>
+                        <li><button class="dropdown-item" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button></li>
                     </ul>
                 </div>
             </td>
@@ -379,19 +581,55 @@ function filterAndSortProducts() {
 function renderProducts() {
     const filtered = filterAndSortProducts();
     const tbody = document.getElementById('products-tbody');
+    const cardsContainer = document.getElementById('products-cards');
+    const tableContainer = document.getElementById('products-table-container');
+    const cardsContainerWrapper = document.getElementById('products-cards-container');
     
     if (filtered.length === 0) {
-        document.getElementById('products-table-container').style.display = 'none';
+        tableContainer.style.display = 'none';
+        cardsContainerWrapper.style.display = 'none';
         document.getElementById('empty-state').style.display = allProducts.length === 0 ? 'block' : 'none';
         if (allProducts.length > 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No products match your filters.</td></tr>';
-            document.getElementById('products-table-container').style.display = 'block';
+            if (currentView === 'table') {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No products match your filters.</td></tr>';
+                tableContainer.style.display = 'block';
+            } else {
+                cardsContainer.innerHTML = '<div class="col-12 text-center text-muted">No products match your filters.</div>';
+                cardsContainerWrapper.style.display = 'block';
+            }
         }
     } else {
         document.getElementById('empty-state').style.display = 'none';
-        document.getElementById('products-table-container').style.display = 'block';
-        tbody.innerHTML = filtered.map(renderProductRow).join('');
+        if (currentView === 'table') {
+            tableContainer.style.display = 'block';
+            cardsContainerWrapper.style.display = 'none';
+            tbody.innerHTML = filtered.map(renderProductRow).join('');
+        } else {
+            tableContainer.style.display = 'none';
+            cardsContainerWrapper.style.display = 'block';
+            cardsContainer.innerHTML = filtered.map(renderProductCard).join('');
+            // Load images after cards are rendered
+            setTimeout(() => loadCardImages(), 100);
+        }
     }
+}
+
+function setView(view) {
+    currentView = view;
+    localStorage.setItem('productView', view);
+    
+    const tableBtn = document.getElementById('view-table-btn');
+    const cardsBtn = document.getElementById('view-cards-btn');
+    
+    if (view === 'table') {
+        tableBtn.classList.add('active');
+        cardsBtn.classList.remove('active');
+    } else {
+        cardsBtn.classList.add('active');
+        tableBtn.classList.remove('active');
+    }
+    
+    renderProducts();
 }
 
 function loadProducts() {
@@ -566,11 +804,12 @@ function loadTrends() {
         });
 }
 
-function toggleProduct(url, btn) {
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
+function deleteProduct(url, name) {
+    if (!confirm(`Delete "${name}"?\n\nThis will permanently remove the product and its history.`)) {
+        return;
+    }
     
-    fetch('/api/product/toggle', {
+    fetch('/api/product/delete', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
@@ -584,15 +823,14 @@ function toggleProduct(url, btn) {
     .then(result => {
         if (result.error) {
             showError(result.error);
-            btn.disabled = false;
         } else {
+            showSuccess(`Deleted "${name}"`);
             loadProducts();
+            loadTrends();
         }
     })
     .catch(error => {
         showError(error.message);
-        btn.innerHTML = originalHtml;
-        btn.disabled = false;
     });
 }
 
@@ -705,6 +943,12 @@ function updateLastUpdate(products) {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize view buttons
+    setView(currentView);
+    
+    document.getElementById('view-table-btn').addEventListener('click', () => setView('table'));
+    document.getElementById('view-cards-btn').addEventListener('click', () => setView('cards'));
+    
     document.getElementById('search-input').addEventListener('input', renderProducts);
     document.getElementById('status-filter').addEventListener('change', renderProducts);
     document.getElementById('trend-days').addEventListener('change', loadTrends);

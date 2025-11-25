@@ -32,3 +32,4 @@ urllib3==1.26.20
 Werkzeug==3.0.0
 wrapt==1.16.0
 Pillow==10.4.0
+brotli==1.1.0

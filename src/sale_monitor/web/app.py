@@ -533,6 +533,71 @@ def create_app():
             products.append(new_product)
             _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
             
+            # Auto-check price for newly added product
+            try:
+                extractor = PriceExtractor(
+                    user_agent=flask_app.config['USER_AGENT'],
+                    timeout=flask_app.config['TIMEOUT'],
+                    max_retries=flask_app.config['MAX_RETRIES']
+                )
+                price, selector_source, detected_currency = extractor.extract_price_with_currency(
+                    new_product.url, 
+                    new_product.selector, 
+                    default_currency=getattr(new_product, 'currency', 'CAD')
+                )
+                
+                if price is not None:
+                    # Determine currency
+                    prefer_detected = os.getenv('PREFER_DETECTED_CURRENCY', '1').strip().lower() not in ('0','false','no')
+                    currency_source = 'default'
+                    if prefer_detected and detected_currency:
+                        currency = detected_currency
+                        currency_source = 'detected'
+                    elif getattr(new_product, 'currency', None):
+                        currency = new_product.currency
+                        currency_source = 'configured'
+                    else:
+                        currency = detected_currency or 'CAD'
+                        currency_source = 'detected' if detected_currency else 'default'
+                    
+                    # Convert to base currency if needed
+                    base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
+                    price_in_base = None
+                    if currency == base_currency:
+                        price_in_base = price
+                    else:
+                        history = PriceHistory(flask_app.config['HISTORY_DB'])
+                        ex_service = ExchangeRateService(cache_handler=history)
+                        converted = ex_service.convert(float(price), currency, base_currency)
+                        price_in_base = converted if converted is not None else None
+                    
+                    # Update state
+                    state = load_state(flask_app.config['STATE_FILE'])
+                    state[new_product.url] = {
+                        'name': new_product.name,
+                        'url': new_product.url,
+                        'current_price': price,
+                        'last_checked': datetime.now(timezone.utc).isoformat(),
+                        'last_price': price,
+                        'selector': new_product.selector,
+                        'selector_source': selector_source,
+                        'currency': currency,
+                        'currency_source': currency_source,
+                        'price_in_base': price_in_base
+                    }
+                    save_state(flask_app.config['STATE_FILE'], state)
+                    
+                    # Record in history
+                    history = PriceHistory(flask_app.config['HISTORY_DB'])
+                    history.record_price(new_product.url, new_product.name, price, status='success', currency=currency)
+                    
+                    logging.info(f"Auto-checked new product '{new_product.name}': ${price} {currency}")
+                else:
+                    logging.warning(f"Failed to auto-check price for new product '{new_product.name}'")
+            except Exception as e:
+                # Don't fail the whole request if price check fails
+                logging.error(f"Error auto-checking price for new product '{new_product.name}': {e}")
+            
             return jsonify({'success': True, 'product': {
                 'name': new_product.name,
                 'url': new_product.url,
@@ -884,9 +949,10 @@ def create_app():
     def _extract_image_url(html: str, base_url: str) -> str | None:
         """Extract representative product image URL from HTML.
         Preference order:
-        1) JSON-LD Product image
-        2) OpenGraph/Twitter card image
-        3) <img> with explicit product-ish classes/attributes (data-zoom-image, srcset largest)
+        1) Amazon-specific image extraction
+        2) JSON-LD Product image
+        3) OpenGraph/Twitter card image
+        4) <img> with explicit product-ish classes/attributes (data-zoom-image, srcset largest)
         """
         import re
         import json as _json
@@ -911,7 +977,30 @@ def create_app():
         if not html:
             return None
 
-        # 1) JSON-LD Product image
+        # 1) Amazon-specific image extraction
+        if 'amazon.' in base_url.lower():
+            # Amazon product images - multiple methods
+            amazon_patterns = [
+                # Main product image (landingImage data)
+                r'"colorImages":\s*{\s*"initial":\s*\[\s*{\s*"large":\s*"([^"]+)"',
+                r'"landingImage":\s*"([^"]+)"',
+                # Image gallery
+                r'"hiRes":\s*"([^"]+)"',
+                r'"large":\s*"([^"]+)"',
+                # Fallback to img tag with specific ID
+                r'<img[^>]+id=["\']landingImage["\'][^>]*src=["\']([^"\']+)["\']',
+                r'<img[^>]+data-old-hires=["\']([^"\']+)["\']',
+                r'<img[^>]+data-a-dynamic-image=["\'][{][^}]*["\']([^"\']+)["\']',
+            ]
+            for pat in amazon_patterns:
+                m = re.search(pat, html, re.I)
+                if m:
+                    img_url = m.group(1).strip()
+                    # Clean up Amazon image URLs (remove size constraints for better quality)
+                    img_url = re.sub(r'\._[A-Z0-9,_]+_\.', '.', img_url)
+                    return _abs(img_url)
+
+        # 2) JSON-LD Product image
         def _find_image(obj):
             if isinstance(obj, dict):
                 for k in ('image', 'imageUrl', 'thumbnailUrl'):
@@ -1011,7 +1100,19 @@ def create_app():
         if not _is_public_url(url):
             return None
         try:
-            resp = requests.get(url, headers={'User-Agent': flask_app.config['USER_AGENT']}, timeout=flask_app.config['TIMEOUT'])
+            # Use enhanced headers for Amazon
+            headers = {'User-Agent': flask_app.config['USER_AGENT']}
+            if 'amazon.' in url.lower():
+                headers.update({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                })
+            
+            resp = requests.get(url, headers=headers, timeout=flask_app.config['TIMEOUT'])
             if resp.status_code >= 400:
                 return None
             img = _extract_image_url(resp.text, url)
@@ -1039,7 +1140,10 @@ def create_app():
         key = hashlib.sha256(f"{image_url}|{max_w}x{max_h}".encode('utf-8')).hexdigest()
         guessed_ext = (Path(image_url).suffix or '').lower()
         ext = '.png' if guessed_ext in ('.png', '.webp') else '.jpg'
-        images_dir = Path('data') / 'images'
+        
+        # Use absolute path from HISTORY_DB config to find data directory
+        data_dir = Path(flask_app.config.get('HISTORY_DB', 'data/history.db')).parent
+        images_dir = data_dir / 'images'
         images_dir.mkdir(parents=True, exist_ok=True)
         out_path = images_dir / f"{key}{ext}"
         if out_path.exists():
@@ -1117,6 +1221,7 @@ def create_app():
             return jsonify({'error': 'url parameter required'}), 400
         if not product_url.lower().startswith(('http://', 'https://')):
             return jsonify({'error': 'invalid url'}), 400
+        
         try:
             max_w = int(request.args.get('w', 600))
             max_h = int(request.args.get('h', 220))
@@ -1124,12 +1229,18 @@ def create_app():
             max_w, max_h = 600, 220
         max_w = max(1, min(max_w, 4096))
         max_h = max(1, min(max_h, 4096))
-        out_path = _ensure_cached_image_file(product_url, max_w, max_h)
-        if not out_path or not Path(out_path).exists():
-            return jsonify({'error': 'image not found'}), 404
-        resp = send_file(out_path, conditional=True)
-        resp.headers['Cache-Control'] = 'public, max-age=86400'
-        return resp
+        
+        try:
+            out_path = _ensure_cached_image_file(product_url, max_w, max_h)
+            if out_path and Path(out_path).exists():
+                resp = send_file(out_path, conditional=True)
+                resp.headers['Cache-Control'] = 'public, max-age=86400'
+                return resp
+            # If caching failed, return 404 instead of 500
+            return jsonify({'error': 'image not available'}), 404
+        except Exception as e:
+            logging.error("Error serving image for %s: %s", product_url, e, exc_info=True)
+            return jsonify({'error': 'image processing failed'}), 404
 
     # ---------------- Periodic image warmup -----------------
     def _warmup_images_once():
@@ -1139,7 +1250,10 @@ def create_app():
         except Exception:
             return
         from pathlib import Path
-        images_dir = Path('data') / 'images'
+        
+        # Use absolute path from HISTORY_DB config
+        data_dir = Path(flask_app.config.get('HISTORY_DB', 'data/history.db')).parent
+        images_dir = data_dir / 'images'
         images_dir.mkdir(parents=True, exist_ok=True)
         stamp_path = images_dir / '.last_warmup'
         lock = FileLock(str(images_dir / 'warmup'))

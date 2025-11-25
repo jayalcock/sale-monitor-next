@@ -17,15 +17,12 @@ class PriceExtractor:
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
             "DNT": "1",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
         })
         self.timeout = timeout
         self.max_retries = max_retries
@@ -87,16 +84,11 @@ class PriceExtractor:
                 
                 # Try auto-detection if manual failed or no selector provided
                 detected_selector, platform, confidence = self.auto_detector.detect_price(resp.text)
-                logging.debug("Auto-detector returned: selector='%s', platform='%s', confidence=%.2f", 
-                            detected_selector, platform, confidence)
                 if detected_selector:
                     el = soup.select_one(detected_selector)
-                    logging.debug("Soup select result for '%s': %s", detected_selector, 'found' if el else 'not found')
                     if el:
                         text = el.get_text(strip=True)
-                        logging.debug("Element text: '%s'", text[:100])
                         price = self._parse_price(text)
-                        logging.debug("Parsed price: %s", price)
                         if price is not None:
                             logging.info("Auto-detected price on %s using %s selector (confidence: %.0f%%)", 
                                        url, platform, confidence * 100)
