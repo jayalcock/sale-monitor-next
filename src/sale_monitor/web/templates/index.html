@@ -3,180 +3,105 @@
 {% block title %}Dashboard - Sale Monitor{% endblock %}
 
 {% block content %}
-<!-- Header -->
-<div class="px-4 sm:px-0">
-    <div class="sm:flex sm:items-center sm:justify-between">
-        <div>
-            <h1 class="text-2xl font-semibold text-white">Product Dashboard</h1>
-            <p id="last-update" class="mt-1 text-sm text-gray-400">Last update: --</p>
-        </div>
-        <div class="mt-4 sm:mt-0 flex gap-3">
-            <button id="update-all-btn" class="inline-flex items-center px-4 py-2 border border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-primary-500">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
-                Update All
-            </button>
-            <a href="/manage" class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-                Add Product
-            </a>
-        </div>
-    </div>
-
-    <!-- Filters and Search -->
-    <div class="mt-6 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-        <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <input type="text" id="search-input" class="block w-full sm:w-64 rounded-md bg-gray-800 border-gray-600 text-white placeholder-gray-400 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm px-3 py-2 border" placeholder="Search products...">
-            <select id="status-filter" class="block w-full sm:w-auto rounded-md bg-gray-800 border-gray-600 text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm px-3 py-2 border">
-                <option value="all">All Status</option>
-                <option value="enabled">Enabled Only</option>
-                <option value="disabled">Disabled Only</option>
-                <option value="alerts">Alerts Only</option>
-            </select>
-        </div>
-        <div class="inline-flex rounded-md shadow-sm" role="group">
-            <button type="button" id="view-table-btn" class="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-800 border border-gray-600 rounded-l-md hover:bg-gray-700 focus:z-10 focus:ring-2 focus:ring-primary-500">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
-                </svg>
-            </button>
-            <button type="button" id="view-cards-btn" class="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-800 border border-gray-600 rounded-r-md hover:bg-gray-700 focus:z-10 focus:ring-2 focus:ring-primary-500">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path>
-                </svg>
-            </button>
+<div class="row">
+    <div class="col-12">
+        <h1>Product Dashboard</h1>
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3">
+                <p id="last-update" class="text-muted mb-0">Last update: --</p>
+                <button id="update-all-btn" class="btn btn-sm btn-outline-primary" title="Check all enabled products now">🔄 Update All</button>
+            </div>
+            <div>
+                <input type="text" id="search-input" class="form-control form-control-sm d-inline-block" style="width: 200px;" placeholder="Search products...">
+                <select id="status-filter" class="form-select form-select-sm d-inline-block ms-2" style="width: 150px;">
+                    <option value="all">All Status</option>
+                    <option value="enabled">Enabled Only</option>
+                    <option value="disabled">Disabled Only</option>
+                    <option value="alerts">Alerts Only</option>
+                </select>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Trends Chart -->
-<div class="mt-8 px-4 sm:px-0">
-    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
-        <div class="px-4 py-5 sm:p-6">
-            <div class="sm:flex sm:items-center sm:justify-between">
-                <h3 class="text-lg leading-6 font-medium text-white">Price Trends</h3>
-                <div class="mt-3 sm:mt-0 flex flex-col sm:flex-row gap-2">
-                    <select id="trend-days" class="block w-full sm:w-auto rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm px-3 py-2 border">
-                        <option value="7">Last 7 days</option>
-                        <option value="30" selected>Last 30 days</option>
-                        <option value="90">Last 90 days</option>
-                    </select>
-                    <select id="trend-mode" class="block w-full sm:w-auto rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm px-3 py-2 border">
-                        <option value="absolute">Scale: Absolute (CAD)</option>
-                        <option value="pct" selected>Scale: % change</option>
-                        <option value="log">Scale: Log (CAD)</option>
-                    </select>
-                    <select id="trend-currency" class="block w-full sm:w-auto rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm px-3 py-2 border">
-                        <option value="base" selected>Currency: Base (CAD)</option>
-                        <option value="native">Currency: Native</option>
-                    </select>
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Trends (Last 30 Days)</h5>
+                    <div class="d-flex gap-2 align-items-center">
+                        <select id="trend-days" class="form-select form-select-sm" style="width: 140px;">
+                            <option value="7">Last 7 days</option>
+                            <option value="30" selected>Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                        <select id="trend-mode" class="form-select form-select-sm" style="width: 180px;" title="Change scale to see variation better">
+                            <option value="absolute" selected>Scale: Absolute (CAD)</option>
+                            <option value="pct">Scale: % change</option>
+                            <option value="log">Scale: Log (CAD)</option>
+                        </select>
+                        <select id="trend-currency" class="form-select form-select-sm" style="width: 190px;" title="Choose display currency">
+                            <option value="base" selected>Currency: Base (CAD)</option>
+                            <option value="native">Currency: Native</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
-            <div class="mt-4 chart-responsive-wrapper">
-                <canvas id="trends-chart"></canvas>
-            </div>
-            <div id="trends-empty" class="mt-4 text-center text-gray-400 text-sm" style="display:none;">No history available yet.</div>
-        </div>
-    </div>
-</div>
-
-<!-- Loading State -->
-<div id="loading" class="mt-8 flex justify-center">
-    <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm text-gray-300">
-        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-primary-600" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        Loading...
-    </div>
-</div>
-
-<!-- Table View -->
-<div id="products-table-container" class="mt-8 px-4 sm:px-0" style="display: none;">
-    <div class="bg-gray-800 shadow rounded-lg overflow-hidden border border-gray-700">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-700" id="products-table">
-                <thead class="bg-gray-900">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('name')">
-                            <div class="flex items-center">
-                                Product <span id="sort-name-icon" class="ml-1">⬍</span>
-                            </div>
-                        </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('merchant')">
-                            <div class="flex items-center">
-                                Merchant <span id="sort-merchant-icon" class="ml-1">⬍</span>
-                            </div>
-                        </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('price')">
-                            <div class="flex items-center">
-                                Current Price <span id="sort-price-icon" class="ml-1">⬍</span>
-                            </div>
-                        </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                            Status
-                        </th>
-                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">
-                            Actions
-                        </th>
-                    </tr>
-                </thead>
-                <tbody id="products-tbody" class="bg-gray-800 divide-y divide-gray-700">
-                    <!-- Products will be inserted here -->
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- Cards View -->
-<div id="products-cards-container" class="mt-8 px-4 sm:px-0" style="display: none;">
-    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" id="products-cards">
-        <!-- Cards will be inserted here -->
-    </div>
-</div>
-
-<!-- Empty State -->
-<div id="empty-state" class="mt-8 px-4 sm:px-0" style="display: none;">
-    <div class="text-center">
-        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
-        </svg>
-        <h3 class="mt-2 text-sm font-medium text-white">No products</h3>
-        <p class="mt-1 text-sm text-gray-400">Get started by adding a new product.</p>
-        <div class="mt-6">
-            <a href="/manage" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-                Add Product
-            </a>
-        </div>
-    </div>
-</div>
-
-<!-- Error Alert -->
-<div id="error-alert" class="mt-8 px-4 sm:px-0 rounded-md bg-red-50 p-4" role="alert" style="display: none;">
-    <div class="flex">
-        <div class="flex-shrink-0">
-            <svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-        </div>
-        <div class="ml-3">
-            <h3 class="text-sm font-medium text-red-800">Error</h3>
-            <div class="mt-2 text-sm text-red-700">
-                <span id="error-message"></span>
+                <div class="chart-responsive-wrapper mt-3">
+                    <canvas id="trends-chart"></canvas>
+                </div>
+                <div id="trends-empty" class="text-muted" style="display:none;">No history available yet.</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Toast Container -->
-<div id="toast-stack" aria-live="polite" aria-atomic="true" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 max-w-md w-full px-4"></div>
+<div id="loading" class="text-center my-5">
+    <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+
+<div id="products-table-container" style="display: none;">
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle mb-0" id="products-table">
+                    <thead>
+                        <tr>
+                            <th style="cursor: pointer;" onclick="sortTable('name')">
+                                Product <span id="sort-name-icon">⬍</span>
+                            </th>
+                            <th style="cursor: pointer;" onclick="sortTable('merchant')">
+                                Merchant <span id="sort-merchant-icon">⬍</span>
+                            </th>
+                            <th style="cursor: pointer;" onclick="sortTable('price')">
+                                Current Price <span id="sort-price-icon">⬍</span>
+                            </th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-tbody">
+                        <!-- Products will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="empty-state" class="alert alert-info" style="display: none;">
+    No products found. <a href="/manage">Add products</a> to get started.
+</div>
+
+<div id="error-alert" class="alert alert-danger" role="alert" style="display: none;">
+    <strong id="alert-prefix">Error:</strong> <span id="error-message"></span>
+    
+</div>
+
+<!-- Floating toast container -->
+<div id="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
 <style>
 .chart-responsive-wrapper {
@@ -186,7 +111,7 @@
     height: 380px;
     position: relative;
 }
-@media (max-width: 640px) {
+@media (max-width: 576px) {
     .chart-responsive-wrapper {
         height: 220px;
         min-height: 160px;
@@ -195,88 +120,80 @@
         max-height: 220px !important;
     }
 }
-
-/* Product card images */
-.product-card-image-wrapper {
-    width: 100%;
-    height: 200px;
-    overflow: hidden;
-    background: #1f2937;
+/* Floating toast styles */
+#toast-stack {
+    position: fixed;
+    top: 70px; /* below any nav/header */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    max-width: min(480px, 90vw);
+    pointer-events: none; /* allow clicks through except on toast itself */
 }
 
-.placeholder-image {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #1f2937;
-    color: #6b7280;
-    font-size: 0.875rem;
-}
-
-.placeholder-image.no-image {
-    background: #374151;
-}
-
-.product-card-image-wrapper img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: center;
-}
-
-/* Toast animations */
 .sm-toast {
     pointer-events: auto;
-    border-radius: 0.5rem;
-    padding: 1rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    font-size: 0.875rem;
+    border-radius: 6px;
+    padding: 10px 14px 10px 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    font-size: 0.9rem;
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
+    gap: 10px;
     animation: slideIn 180ms ease-out;
     position: relative;
 }
 
-.sm-toast-success { 
-    background-color: #10b981;
-    color: white;
-}
-.sm-toast-error { 
-    background-color: #ef4444;
-    color: white;
-}
+.sm-toast-success { background: #198754; color: #fff; }
+.sm-toast-error { background: #dc3545; color: #fff; }
 
 .sm-toast button.close-btn {
     background: none;
     border: none;
     color: inherit;
-    font-size: 1.25rem;
+    font-size: 1rem;
     line-height: 1;
     cursor: pointer;
-    opacity: 0.8;
+    opacity: 0.85;
     transition: opacity .15s;
-    padding: 0;
-    margin-left: auto;
+    padding: 2px 4px;
 }
 .sm-toast button.close-btn:hover { opacity: 1; }
 
 @keyframes slideIn {
-    from { opacity: 0; transform: translateY(-0.5rem); }
-    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* View toggle active state */
-#view-table-btn.active,
-#view-cards-btn.active {
-    background-color: #0ea5e9;
-    color: white;
-    border-color: #0ea5e9;
+@media (max-width: 576px) {
+    #toast-stack { top: 60px; }
+}
+
+/* Mobile dropdown for actions */
+@media (max-width: 768px) {
+    .action-buttons {
+        display: none;
+    }
+    .action-dropdown {
+        display: inline-block !important;
+    }
+}
+
+@media (min-width: 769px) {
+    .action-dropdown {
+        display: none !important;
+    }
+}
+
+.table th {
+    user-select: none;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(0, 0, 0, 0.075);
 }
 </style>
 {% endblock %}
@@ -286,11 +203,9 @@
 let refreshInterval;
 let trendsChart = null;
 let allProducts = [];
-let productAlerts = {}; // Map of URL -> alert object
 let CURRENT_BASE_CURRENCY = 'CAD';
 let sortBy = 'name';
 let sortDesc = false;
-let currentView = localStorage.getItem('productView') || 'table';
 
 function getMerchant(product) {
     try {
@@ -319,140 +234,52 @@ function formatPriceCell(product) {
     const priceInBase = product.price_in_base;
     const currencySource = (product.currency_source || '').toLowerCase();
     if (price === null || price === undefined) {
-        return '<span class="text-gray-500">N/A</span>';
+        return '<span class="text-muted">N/A</span>';
     }
     const native = `$${parseFloat(price).toFixed(2)} ${currency}`;
     const approx = (priceInBase != null && baseCur && baseCur !== currency)
-        ? ` <span class="text-gray-500">(~$${parseFloat(priceInBase).toFixed(2)} ${baseCur})</span>`
+        ? ` <span class="text-muted">(~$${parseFloat(priceInBase).toFixed(2)} ${baseCur})</span>`
         : '';
     const badge = (currencySource && currencySource !== 'detected')
-        ? ` <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800" title="Currency not detected from page; ${currencySource} value used">⚠︎</span>`
+        ? ` <span class="badge rounded-pill bg-warning text-dark" title="Currency not detected from page; ${currencySource} value used">⚠︎</span>`
         : '';
     return `${native}${approx}${badge}`;
 }
 
 function getPriceStatus(product) {
-    // Check if this product has an active alert from the API
-    const alert = productAlerts[product.url];
-    if (alert) {
-        return alert.alert_type;
+    if (!product.current_price) return 'unknown';
+    
+    const current = parseFloat(product.current_price);
+    
+    if (product.target_price && current <= product.target_price) {
+        return 'target-met';
     }
     
-    return product.current_price ? 'normal' : 'unknown';
+    if (product.discount_threshold && product.last_price) {
+        const last = parseFloat(product.last_price);
+        const drop = ((last - current) / last) * 100;
+        if (drop >= product.discount_threshold) {
+            return 'discount-met';
+        }
+    }
+    
+    return 'normal';
 }
 
 function getStatusBadge(status) {
     const badges = {
-        'target_met': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">🎯 Target Met</span>',
-        'discount_met': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">📉 Big Discount</span>',
-        'high_failure': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">⚠️ Failing</span>',
-        'normal': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Watching</span>',
-        'unknown': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">No Data</span>'
+        'target-met': '<span class="badge bg-success">🎯 Target Met</span>',
+        'discount-met': '<span class="badge bg-warning text-dark">📉 Big Discount</span>',
+        'normal': '<span class="badge bg-secondary">Watching</span>',
+        'unknown': '<span class="badge bg-light text-dark">No Data</span>'
     };
     return badges[status] || badges.unknown;
 }
 
 function getEnabledBadge(enabled) {
     return enabled 
-        ? '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Enabled</span>' 
-        : '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Disabled</span>';
-}
-
-function renderProductCard(product) {
-    const status = getPriceStatus(product);
-    const statusBadge = getStatusBadge(status);
-    const enabledBadge = getEnabledBadge(product.enabled);
-    const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
-    const merchant = getMerchant(product);
-    
-    return `
-        <div class="col" data-product-name="${product.name.toLowerCase()}" 
-             data-product-url="${encodeURIComponent(product.url)}"
-             data-status="${product.enabled ? 'enabled' : 'disabled'}" 
-             data-alert="${status}"
-             data-price="${product.current_price || 0}"
-             data-merchant="${merchant.toLowerCase()}">
-            <div class="bg-gray-800 rounded-lg shadow-sm overflow-hidden transition-transform hover:-translate-y-1 h-full flex flex-col border border-gray-700">
-                <div class="product-card-image-wrapper">
-                    <div class="placeholder-image">
-                        <div class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-r-transparent align-[-0.125em] text-gray-400" role="status">
-                            <span class="sr-only">Loading...</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="p-4 flex flex-col flex-grow">
-                    <h5 class="text-lg font-semibold mb-2">
-                        <a href="${historyUrl}" class="text-white hover:text-primary-400">${product.name}</a>
-                    </h5>
-                    <a href="${product.url}" target="_blank" class="text-primary-400 hover:text-primary-300 text-sm mb-3" style="text-decoration: underline;">${merchant}</a>
-                    <div class="text-2xl font-bold text-white mb-3">${formatPriceCell(product)}</div>
-                    <div class="mb-3 flex gap-2 flex-wrap">
-                        ${statusBadge}
-                        ${enabledBadge}
-                    </div>
-                    <div class="mt-auto flex flex-col gap-2">
-                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-primary-600 text-sm font-medium rounded-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button>
-                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-function loadCardImages() {
-    // Load images for all visible cards
-    const cols = document.querySelectorAll('#products-cards [data-product-url]');
-    console.log('Loading images for', cols.length, 'cards');
-    
-    cols.forEach((col, index) => {
-        const productUrl = decodeURIComponent(col.dataset.productUrl);
-        const wrapper = col.querySelector('.product-card-image-wrapper');
-        
-        console.log('Card', index, 'URL:', productUrl);
-        
-        if (!wrapper || wrapper.dataset.loaded === 'true') {
-            console.log('Skipping card', index, '- wrapper:', !!wrapper, 'loaded:', wrapper?.dataset.loaded);
-            return;
-        }
-        wrapper.dataset.loaded = 'true';
-        
-        // Try to load image
-        const imageUrl = `/api/product/image/file?url=${encodeURIComponent(productUrl)}&w=400&h=200`;
-        console.log('Fetching image:', imageUrl);
-        
-        fetch(imageUrl)
-            .then(r => {
-                console.log('Image response status:', r.status, 'content-type:', r.headers.get('Content-Type'));
-                if (r.ok && r.headers.get('Content-Type')?.startsWith('image/')) {
-                    return r.blob();
-                }
-                throw new Error(`HTTP ${r.status} - Not an image`);
-            })
-            .then(blob => {
-                console.log('Got image blob:', blob.size, 'bytes');
-                const objUrl = URL.createObjectURL(blob);
-                const img = document.createElement('img');
-                img.className = 'product-card-image';
-                img.alt = col.dataset.productName || 'Product image';
-                img.onload = () => {
-                    console.log('Image loaded successfully');
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(img);
-                    URL.revokeObjectURL(objUrl);
-                };
-                img.onerror = (e) => {
-                    console.error('Image element load error:', e);
-                    wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
-                    URL.revokeObjectURL(objUrl);
-                };
-                img.src = objUrl;
-            })
-            .catch((err) => {
-                console.error('Image fetch error:', err);
-                wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
-            });
-    });
+        ? '<span class="badge bg-success">Enabled</span>' 
+        : '<span class="badge bg-secondary">Disabled</span>';
 }
 
 function renderProductRow(product) {
@@ -460,6 +287,8 @@ function renderProductRow(product) {
     const statusBadge = getStatusBadge(status);
     const enabledBadge = getEnabledBadge(product.enabled);
     const historyUrl = `/product/detail?url=${encodeURIComponent(product.url)}`;
+    const toggleText = product.enabled ? '⏸ Disable' : '▶️ Enable';
+    const toggleClass = product.enabled ? 'btn-warning' : 'btn-success';
     const merchant = getMerchant(product);
     
     return `
@@ -467,18 +296,24 @@ function renderProductRow(product) {
             data-status="${product.enabled ? 'enabled' : 'disabled'}" 
             data-alert="${status}"
             data-price="${product.current_price || 0}"
-            data-merchant="${merchant.toLowerCase()}"
-            class="hover:bg-gray-700">
-            <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]"><a href="${historyUrl}" class="text-primary-400 hover:text-primary-300 font-medium">${product.name}</a></td>
-            <td class="px-6 py-4 whitespace-normal break-all align-top"><a href="${product.url}" target="_blank" class="text-gray-400 hover:text-gray-300 underline">${merchant}</a></td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-white align-top">${formatPriceCell(product)}</td>
-            <td class="px-6 py-4 whitespace-normal align-top text-sm">
-                <div class="flex gap-2 flex-wrap">${statusBadge} ${enabledBadge}</div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
-                <div class="inline-flex rounded-md shadow-sm" role="group">
-                    <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
-                    <button class="inline-flex items-center px-3 py-2 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
+            data-merchant="${merchant.toLowerCase()}">
+            <td><a href="${historyUrl}" class="text-decoration-none"><strong>${product.name}</strong></a></td>
+            <td><a href="${product.url}" target="_blank" class="text-muted text-decoration-none">${merchant}</a></td>
+            <td>${formatPriceCell(product)}</td>
+            <td>${statusBadge} ${enabledBadge}</td>
+            <td class="text-end">
+                <div class="action-buttons btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-info" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
+                    <button class="btn ${toggleClass}" onclick="toggleProduct('${product.url}', this)">${toggleText}</button>
+                </div>
+                <div class="action-dropdown dropdown" style="display: none;">
+                    <button class="btn btn-sm btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        Actions
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><button class="dropdown-item" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button></li>
+                        <li><button class="dropdown-item" onclick="toggleProduct('${product.url}', this)">${toggleText}</button></li>
+                    </ul>
                 </div>
             </td>
         </tr>
@@ -514,7 +349,7 @@ function filterAndSortProducts() {
         const matchesStatus = statusFilter === 'all' || 
                             (statusFilter === 'enabled' && product.enabled) ||
                             (statusFilter === 'disabled' && !product.enabled) ||
-                            (statusFilter === 'alerts' && (status === 'target_met' || status === 'discount_met' || status === 'high_failure'));
+                            (statusFilter === 'alerts' && (status === 'target-met' || status === 'discount-met'));
         return matchesSearch && matchesStatus;
     });
     
@@ -544,95 +379,50 @@ function filterAndSortProducts() {
 function renderProducts() {
     const filtered = filterAndSortProducts();
     const tbody = document.getElementById('products-tbody');
-    const cardsContainer = document.getElementById('products-cards');
-    const tableContainer = document.getElementById('products-table-container');
-    const cardsContainerWrapper = document.getElementById('products-cards-container');
     
     if (filtered.length === 0) {
-        tableContainer.style.display = 'none';
-        cardsContainerWrapper.style.display = 'none';
+        document.getElementById('products-table-container').style.display = 'none';
         document.getElementById('empty-state').style.display = allProducts.length === 0 ? 'block' : 'none';
         if (allProducts.length > 0) {
-            if (currentView === 'table') {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No products match your filters.</td></tr>';
-                tableContainer.style.display = 'block';
-            } else {
-                cardsContainer.innerHTML = '<div class="col-span-full text-center text-gray-400 py-8">No products match your filters.</div>';
-                cardsContainerWrapper.style.display = 'block';
-            }
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No products match your filters.</td></tr>';
+            document.getElementById('products-table-container').style.display = 'block';
         }
     } else {
         document.getElementById('empty-state').style.display = 'none';
-        if (currentView === 'table') {
-            tableContainer.style.display = 'block';
-            cardsContainerWrapper.style.display = 'none';
-            tbody.innerHTML = filtered.map(renderProductRow).join('');
-        } else {
-            tableContainer.style.display = 'none';
-            cardsContainerWrapper.style.display = 'block';
-            cardsContainer.innerHTML = filtered.map(renderProductCard).join('');
-            // Load images after cards are rendered
-            setTimeout(() => loadCardImages(), 100);
-        }
+        document.getElementById('products-table-container').style.display = 'block';
+        tbody.innerHTML = filtered.map(renderProductRow).join('');
     }
-}
-
-function setView(view) {
-    currentView = view;
-    localStorage.setItem('productView', view);
-    
-    const tableBtn = document.getElementById('view-table-btn');
-    const cardsBtn = document.getElementById('view-cards-btn');
-    
-    if (view === 'table') {
-        tableBtn.classList.add('active');
-        cardsBtn.classList.remove('active');
-    } else {
-        cardsBtn.classList.add('active');
-        tableBtn.classList.remove('active');
-    }
-    
-    renderProducts();
 }
 
 function loadProducts() {
-    // Fetch both products and alerts in parallel
-    Promise.all([
-        fetch('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
-        fetch('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts'))
-    ])
-    .then(([products, alerts]) => {
-        allProducts = products;
-        
-        // Build alert lookup map
-        productAlerts = {};
-        if (Array.isArray(alerts)) {
-            alerts.forEach(alert => {
-                productAlerts[alert.url] = alert;
-            });
-        }
-        
-        // Capture base currency from API (same for all products)
-        if (products && products.length) {
-            CURRENT_BASE_CURRENCY = (products[0].base_currency || 'CAD');
-            // Update trend mode labels to reflect current base currency
-            const absOpt = document.querySelector('#trend-mode option[value="absolute"]');
-            const logOpt = document.querySelector('#trend-mode option[value="log"]');
-            if (absOpt) absOpt.textContent = `Scale: Absolute (${CURRENT_BASE_CURRENCY})`;
-            if (logOpt) logOpt.textContent = `Scale: Log (${CURRENT_BASE_CURRENCY})`;
-            // Update currency toggle base label
-            const baseCurOpt = document.querySelector('#trend-currency option[value="base"]');
-            if (baseCurOpt) baseCurOpt.textContent = `Currency: Base (${CURRENT_BASE_CURRENCY})`;
-        }
-        document.getElementById('loading').style.display = 'none';
-        renderProducts();
-        updateLastUpdate(products);
-    })
-    .catch(error => {
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('error-message').textContent = error.message || error;
-        document.getElementById('error-alert').style.display = 'block';
-    });
+    fetch('/api/products')
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch products');
+            return response.json();
+        })
+        .then(products => {
+            allProducts = products;
+            // Capture base currency from API (same for all products)
+            if (products && products.length) {
+                CURRENT_BASE_CURRENCY = (products[0].base_currency || 'CAD');
+                // Update trend mode labels to reflect current base currency
+                const absOpt = document.querySelector('#trend-mode option[value="absolute"]');
+                const logOpt = document.querySelector('#trend-mode option[value="log"]');
+                if (absOpt) absOpt.textContent = `Scale: Absolute (${CURRENT_BASE_CURRENCY})`;
+                if (logOpt) logOpt.textContent = `Scale: Log (${CURRENT_BASE_CURRENCY})`;
+                // Update currency toggle base label
+                const baseCurOpt = document.querySelector('#trend-currency option[value="base"]');
+                if (baseCurOpt) baseCurOpt.textContent = `Currency: Base (${CURRENT_BASE_CURRENCY})`;
+            }
+            document.getElementById('loading').style.display = 'none';
+            renderProducts();
+            updateLastUpdate(products);
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-message').textContent = error.message;
+            document.getElementById('error-alert').style.display = 'block';
+        });
 }
 
 function uniq(arr) {
@@ -665,6 +455,7 @@ function loadTrends() {
                 return;
             }
             emptyDiv.style.display = 'none';
+
             const allDates = uniq(seriesList.flatMap(item => item.series.map(p => {
                 const d = parseUtcIso(p.timestamp);
                 return d ? d.toISOString().slice(0,10) : null;
@@ -708,46 +499,21 @@ function loadTrends() {
             });
 
             const ctx = canvas.getContext('2d');
-            
-            // Custom plugin to draw dark background
-            const darkBackgroundPlugin = {
-                id: 'darkBackground',
-                beforeDraw: (chart) => {
-                    const ctx = chart.ctx;
-                    ctx.save();
-                    ctx.fillStyle = '#1f2937';
-                    ctx.fillRect(0, 0, chart.width, chart.height);
-                    ctx.restore();
-                }
-            };
-            
             trendsChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: allDates.map(d => new Date(d).toLocaleDateString()),
                     datasets
                 },
-                plugins: [darkBackgroundPlugin],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { 
-                            position: 'bottom', 
-                            labels: { 
-                                font: fontSizeForDevice(),
-                                color: '#d1d5db'
-                            } 
-                        },
+                        legend: { position: 'bottom', labels: { font: fontSizeForDevice() } },
                         tooltip: {
                             mode: 'index',
                             intersect: false,
                             bodyFont: fontSizeForDevice(),
-                            backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                            titleColor: '#fff',
-                            bodyColor: '#d1d5db',
-                            borderColor: '#374151',
-                            borderWidth: 1,
                             callbacks: {
                                 label: context => {
                                     const v = context.parsed.y;
@@ -765,27 +531,17 @@ function loadTrends() {
                     interaction: { mode: 'nearest', intersect: false },
                     scales: {
                         x: {
-                            grid: {
-                                color: '#374151',
-                                drawBorder: false
-                            },
                             ticks: {
                                 font: fontSizeForDevice(),
-                                maxTicksLimit: isMobile() ? 4 : 10,
-                                color: '#9ca3af'
+                                maxTicksLimit: isMobile() ? 4 : 10
                             }
                         },
                         y: {
                             beginAtZero: false,
                             type: (mode === 'log') ? 'logarithmic' : 'linear',
-                            grid: {
-                                color: '#374151',
-                                drawBorder: false
-                            },
                             ticks: {
                                 font: fontSizeForDevice(),
                                 maxTicksLimit: isMobile() ? 4 : 10,
-                                color: '#9ca3af',
                                 callback: value => {
                                     if (mode === 'pct') return `${Number(value).toFixed(0)}%`;
                                     return `$${Number(value).toFixed(2)}`;
@@ -810,12 +566,11 @@ function loadTrends() {
         });
 }
 
-function deleteProduct(url, name) {
-    if (!confirm(`Delete "${name}"?\n\nThis will permanently remove the product and its history.`)) {
-        return;
-    }
+function toggleProduct(url, btn) {
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
     
-    fetch('/api/product/delete', {
+    fetch('/api/product/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
@@ -829,14 +584,15 @@ function deleteProduct(url, name) {
     .then(result => {
         if (result.error) {
             showError(result.error);
+            btn.disabled = false;
         } else {
-            showSuccess(`Deleted "${name}"`);
             loadProducts();
-            loadTrends();
         }
     })
     .catch(error => {
         showError(error.message);
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
     });
 }
 
@@ -949,12 +705,6 @@ function updateLastUpdate(products) {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize view buttons
-    setView(currentView);
-    
-    document.getElementById('view-table-btn').addEventListener('click', () => setView('table'));
-    document.getElementById('view-cards-btn').addEventListener('click', () => setView('cards'));
-    
     document.getElementById('search-input').addEventListener('input', renderProducts);
     document.getElementById('status-filter').addEventListener('change', renderProducts);
     document.getElementById('trend-days').addEventListener('change', loadTrends);
