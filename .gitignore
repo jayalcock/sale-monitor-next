@@ -1,0 +1,49 @@
+.conda/
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+data/images/
+
+
+# OS/Editor junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data/state (do not publish)
+data/state.json
+data/products.csv
+data/.last_warmup
+
+# SQLite databases and temporary files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Database backup and quarantine files
+*.db.backup-*
+*.db.corrupt-*
+*.db.before-*
+*.db.minimal-*
+*.db.local-*
+*.db.recovered-*
+
+# Build artifacts
+dist/
+build/
+
+# Deployment script output
+deploy.log

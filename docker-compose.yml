@@ -1,0 +1,43 @@
+services:
+  sale-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sale-monitor
+    restart: unless-stopped
+    labels:
+      - "net.unraid.docker.webui=http://[IP]:[PORT:5050]"
+      - "net.unraid.docker.icon=http://[IP]:[PORT:5050]/static/img/icon.png"
+    env_file:
+      - .env
+    environment:
+      # General
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-30m}
+      - HISTORY_RETENTION_DAYS=${HISTORY_RETENTION_DAYS:-90}
+      # Email notifications
+      - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      # Web runtime
+      - PRODUCTS_CSV=/app/data/products.csv
+      - STATE_FILE=/app/data/state.json
+      - HISTORY_DB=/app/data/history.db
+      - FLASK_DEBUG=0
+      - USER_AGENT=${USER_AGENT:-Mozilla/5.0 (compatible; SaleMonitor/1.0)}
+      - TIMEOUT=${TIMEOUT:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+    ports:
+      - "5050:5000"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:5000/').getcode()<400 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
