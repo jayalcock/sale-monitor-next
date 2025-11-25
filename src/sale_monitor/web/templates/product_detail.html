@@ -167,20 +167,48 @@ function loadProductInfo(url) {
             
             document.getElementById('product-name').textContent = product.name;
             // Try load product image
-            fetch(`/api/product/image?url=${encodeURIComponent(product.url)}`)
-                .then(r => r.ok ? r.json() : Promise.reject())
-                .then(data => {
-                    if (data && data.image_url) {
-                        const img = document.getElementById('product-image');
-                        img.src = data.image_url;
-                        img.style.display = 'inline-block';
-                        document.getElementById('product-image-fallback').style.display = 'none';
-                    } else {
-                        document.getElementById('product-image-fallback').style.display = 'block';
+            // Use proxying file endpoint (resized & cached). Fallback to original URL endpoint if needed.
+            const imgEl = document.getElementById('product-image');
+            const fallbackEl = document.getElementById('product-image-fallback');
+            const proxyUrl = `/api/product/image/file?url=${encodeURIComponent(product.url)}&w=600&h=220`;
+            const originalMetaUrl = `/api/product/image?url=${encodeURIComponent(product.url)}`;
+
+            function showFallback() {
+                imgEl.style.display = 'none';
+                fallbackEl.style.display = 'block';
+            }
+            fetch(proxyUrl)
+                .then(r => {
+                    if (r.ok && r.headers.get('Content-Type')?.startsWith('image/')) {
+                        return r.blob();
                     }
+                    throw new Error('proxy not image');
+                })
+                .then(blob => {
+                    const objUrl = URL.createObjectURL(blob);
+                    imgEl.onload = () => {
+                        URL.revokeObjectURL(objUrl);
+                    };
+                    imgEl.onerror = showFallback;
+                    imgEl.src = objUrl;
+                    imgEl.style.display = 'inline-block';
+                    fallbackEl.style.display = 'none';
                 })
                 .catch(() => {
-                    document.getElementById('product-image-fallback').style.display = 'block';
+                    // Fallback: get original image URL (no resize)
+                    fetch(originalMetaUrl)
+                        .then(r => r.ok ? r.json() : Promise.reject())
+                        .then(data => {
+                            if (data && data.image_url) {
+                                imgEl.onerror = showFallback;
+                                imgEl.src = data.image_url;
+                                imgEl.style.display = 'inline-block';
+                                fallbackEl.style.display = 'none';
+                            } else {
+                                showFallback();
+                            }
+                        })
+                        .catch(showFallback);
                 });
             
             // Determine selector display
