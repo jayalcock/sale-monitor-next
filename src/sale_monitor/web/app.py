@@ -637,17 +637,20 @@ def create_app():
                 alert_type = None
                 message = None
 
+                currency = (state_data.get('currency') or '').upper()
+                cur_prefix = f"[{currency}] " if currency else ""
+
                 # Check target price
                 if p.target_price and current <= p.target_price:
                     alert_type = 'target_met'
-                    message = f'Price ${current:.2f} is at or below target ${p.target_price:.2f}'
+                    message = f'{cur_prefix}Price ${current:.2f} is at or below target ${p.target_price:.2f}'
 
                 # Check discount threshold
                 elif p.discount_threshold and last:
                     discount = ((last - current) / last) * 100
                     if discount >= p.discount_threshold:
                         alert_type = 'discount_met'
-                        message = f'Price dropped {discount:.1f}% (${last:.2f} → ${current:.2f})'
+                        message = f'{cur_prefix}Price dropped {discount:.1f}% (${last:.2f} → ${current:.2f})'
 
                 if alert_type:
                     alerts.append({
@@ -831,43 +834,173 @@ def create_app():
     # Simple in-memory image cache: {url: {image_url: str, fetched: datetime}}
     _IMAGE_CACHE = {}
 
+    def _is_public_url(url: str) -> bool:
+        """Basic SSRF guard: allow only http/https and public IPs/hosts."""
+        from urllib.parse import urlparse
+        import socket
+        import ipaddress
+
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = (parsed.hostname or "").strip()
+        if not hostname:
+            return False
+        # Disallow obvious local names
+        forbidden_hosts = {"localhost", "localhost.localdomain"}
+        if hostname in forbidden_hosts:
+            return False
+        try:
+            infos = socket.getaddrinfo(hostname, None)
+        except socket.gaierror:
+            return False
+        if not infos:
+            return False
+        for rec in infos:
+            family = rec[0]
+            try:
+                if family == socket.AF_INET:
+                    ip = ipaddress.ip_address(rec[4][0])
+                elif hasattr(socket, 'AF_INET6') and family == socket.AF_INET6:
+                    ip = ipaddress.ip_address(rec[4][0])
+                else:
+                    # Unknown family: reject
+                    return False
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_reserved
+                ):
+                    return False
+            except (ValueError, OSError):
+                return False
+        return True
+
     def _extract_image_url(html: str, base_url: str) -> str | None:
         """Extract representative product image URL from HTML.
-        Prefers og:image; falls back to heuristic img tag patterns."""
+        Preference order:
+        1) JSON-LD Product image
+        2) OpenGraph/Twitter card image
+        3) <img> with explicit product-ish classes/attributes (data-zoom-image, srcset largest)
+        """
         import re
+        import json as _json
         from urllib.parse import urlparse, urljoin
+
+        def _abs(u: str) -> str:
+            if not u:
+                return u
+            p = urlparse(u)
+            if not p.scheme:
+                if u.startswith('//'):
+                    base_p = urlparse(base_url)
+                    scheme = base_p.scheme or 'https'
+                    return f"{scheme}:{u}"
+                return urljoin(base_url, u)
+            # Prefer https if base is https
+            base_p = urlparse(base_url)
+            if p.scheme == 'http' and (base_p.scheme or '').lower() == 'https':
+                return u.replace('http://', 'https://', 1)
+            return u
+
         if not html:
             return None
-        patterns = [
+
+        # 1) JSON-LD Product image
+        def _find_image(obj):
+            if isinstance(obj, dict):
+                for k in ('image', 'imageUrl', 'thumbnailUrl'):
+                    if k in obj:
+                        v = obj[k]
+                        if isinstance(v, str):
+                            return v
+                        if isinstance(v, list) and v and isinstance(v[0], str):
+                            # choose first
+                            return v[0]
+                for v in obj.values():
+                    out = _find_image(v)
+                    if out:
+                        return out
+            elif isinstance(obj, list):
+                for it in obj:
+                    out = _find_image(it)
+                    if out:
+                        return out
+            return None
+
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = m.group(1).strip()
+            try:
+                data = _json.loads(block)
+            except (_json.JSONDecodeError, ValueError, TypeError):
+                continue
+            img = _find_image(data)
+            if img:
+                return _abs(img.strip())
+
+        # 2) OG/Twitter meta
+        meta_patterns = (
             r'<meta[^>]+property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
             r'<meta[^>]+name=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+            r'<meta[^>]+property=["\']twitter:image(?:\:src)?["\'][^>]*content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']twitter:image(?:\:src)?["\'][^>]*content=["\']([^"\']+)["\']',
+        )
+        for pat in meta_patterns:
+            m = re.search(pat, html, re.I)
+            if m:
+                return _abs(m.group(1).strip())
+
+        # 3) <img> with product-ish cues, prefer zoom/large attributes
+        # 3a) data-zoom-image / data-large_image / data-src
+        attr_patterns = (
+            r'<img[^>]+data-zoom-image=["\']([^"\']+)["\']',
+            r'<img[^>]+data-large[_-]image=["\']([^"\']+)["\']',
+            r'<img[^>]+data-src=["\']([^"\']+)["\']',
+        )
+        for pat in attr_patterns:
+            m = re.search(pat, html, re.I)
+            if m:
+                return _abs(m.group(1).strip())
+
+        # 3b) srcset: choose the largest width
+        m = re.search(r'<img[^>]+srcset=["\']([^"\']+)["\'][^>]*', html, re.I)
+        if m:
+            srcset = m.group(1)
+            # parse entries: url [Nw]
+            candidates = []
+            for part in srcset.split(','):
+                seg = part.strip()
+                if not seg:
+                    continue
+                pieces = seg.split()
+                url = pieces[0]
+                w = 0
+                if len(pieces) > 1 and pieces[1].endswith('w'):
+                    try:
+                        w = int(pieces[1][:-1])
+                    except ValueError:
+                        w = 0
+                candidates.append((w, url))
+            if candidates:
+                candidates.sort()
+                return _abs(candidates[-1][1].strip())
+
+        # 3c) generic product/main image class or alt pattern
+        patterns = [
             r'<img[^>]+class=["\'][^"\']*(?:product|main|primary|image)[^"\']*["\'][^>]*src=["\']([^"\']+)["\']',
-            r'<img[^>]+src=["\']([^"\']+)["\'][^>]*alt=["\'][^"\']*(?:product|frame|brake|derailleur|hoops|dream|machine|u7)[^"\']*["\']'
+            r'<img[^>]+src=["\']([^"\']+)["\'][^>]*alt=["\'][^"\']*(?:product|frame|brake|derailleur|hoops|dream|machine|u7)["\']',
         ]
-        candidate = None
         for pat in patterns:
             m = re.search(pat, html, re.IGNORECASE)
             if m:
-                candidate = m.group(1).strip()
-                break
-        if not candidate:
-            return None
-        # urlparse already imported above
-        parsed = urlparse(candidate)
-        if not parsed.scheme:
-            if candidate.startswith('//'):
-                base_parsed = urlparse(base_url)
-                scheme = base_parsed.scheme or 'https'
-                candidate = f"{scheme}:{candidate}"
-            else:
-                # urljoin already imported above
-                candidate = urljoin(base_url, candidate)
-        else:
-            # If the image is HTTP but base page is HTTPS, try upgrading to HTTPS
-            base_parsed = urlparse(base_url)
-            if parsed.scheme == 'http' and (base_parsed.scheme or '').lower() == 'https':
-                candidate = candidate.replace('http://', 'https://', 1)
-        return candidate
+                return _abs(m.group(1).strip())
+
+        return None
 
     def _fetch_product_image(url: str) -> str | None:
         from datetime import timedelta
@@ -875,16 +1008,86 @@ def create_app():
         cached = _IMAGE_CACHE.get(url)
         if cached and (now - cached['fetched']) < timedelta(hours=24):
             return cached['image_url']
+        if not _is_public_url(url):
+            return None
         try:
             resp = requests.get(url, headers={'User-Agent': flask_app.config['USER_AGENT']}, timeout=flask_app.config['TIMEOUT'])
             if resp.status_code >= 400:
                 return None
             img = _extract_image_url(resp.text, url)
+            if img and not _is_public_url(img):
+                return None
             if img:
                 _IMAGE_CACHE[url] = {'image_url': img, 'fetched': now}
             return img
         except requests.exceptions.RequestException:
             return None
+
+    def _ensure_cached_image_file(product_url: str, max_w: int, max_h: int):
+        """Ensure a resized, cached image exists for the given product URL.
+        Returns Path to cached file or None on failure.
+        """
+        from io import BytesIO
+        import hashlib
+        import mimetypes
+        from pathlib import Path
+        from PIL import Image, ImageOps
+
+        image_url = _fetch_product_image(product_url)
+        if not image_url:
+            return None
+        key = hashlib.sha256(f"{image_url}|{max_w}x{max_h}".encode('utf-8')).hexdigest()
+        guessed_ext = (Path(image_url).suffix or '').lower()
+        ext = '.png' if guessed_ext in ('.png', '.webp') else '.jpg'
+        images_dir = Path('data') / 'images'
+        images_dir.mkdir(parents=True, exist_ok=True)
+        out_path = images_dir / f"{key}{ext}"
+        if out_path.exists():
+            return out_path
+        try:
+            if not _is_public_url(image_url):
+                return None
+            r = requests.get(image_url, headers={'User-Agent': flask_app.config['USER_AGENT']}, timeout=flask_app.config['TIMEOUT'], stream=True)
+            if r.status_code >= 400:
+                return None
+            content_type = r.headers.get('Content-Type', '').lower()
+            if not content_type.startswith('image/'):
+                guessed, _ = mimetypes.guess_type(image_url)
+                if not (guessed and guessed.startswith('image/')):
+                    return None
+            # Enforce a hard cap on downloaded bytes (e.g., 5 MiB)
+            max_bytes = int(os.getenv('IMAGE_MAX_BYTES', '5242880'))
+            read = 0
+            buf = BytesIO()
+            for chunk in r.iter_content(65536):
+                if not chunk:
+                    break
+                read += len(chunk)
+                if read > max_bytes:
+                    return None
+                buf.write(chunk)
+            buf.seek(0)
+            raw = buf
+        except requests.exceptions.RequestException:
+            return None
+        try:
+            with Image.open(raw) as im:
+                im = ImageOps.exif_transpose(im)
+                if im.mode in ('P', 'LA'):
+                    im = im.convert('RGBA')
+                im.thumbnail((max_w, max_h), Image.LANCZOS)
+                has_alpha = im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info)
+                fmt = 'PNG' if has_alpha or ext == '.png' else 'JPEG'
+                if fmt == 'JPEG' and im.mode not in ('RGB', 'L'):
+                    im = im.convert('RGB')
+                save_kwargs = {'quality': 85, 'optimize': True} if fmt == 'JPEG' else {}
+                out_tmp = out_path.with_suffix(out_path.suffix + '.tmp')
+                with open(out_tmp, 'wb') as f:
+                    im.save(f, format=fmt, **save_kwargs)
+                out_tmp.replace(out_path)
+        except Exception:
+            return None
+        return out_path
 
     @flask_app.route('/api/product/image')
     def api_product_image():
@@ -907,19 +1110,13 @@ def create_app():
         - w: max width in px (optional, default 600)
         - h: max height in px (optional, default 220)
         """
-        from io import BytesIO
-        import hashlib
-        import mimetypes
         from pathlib import Path
-        from PIL import Image, ImageOps
 
         product_url = request.args.get('url', type=str)
         if not product_url:
             return jsonify({'error': 'url parameter required'}), 400
         if not product_url.lower().startswith(('http://', 'https://')):
             return jsonify({'error': 'invalid url'}), 400
-
-        # Bounds
         try:
             max_w = int(request.args.get('w', 600))
             max_h = int(request.args.get('h', 220))
@@ -927,74 +1124,77 @@ def create_app():
             max_w, max_h = 600, 220
         max_w = max(1, min(max_w, 4096))
         max_h = max(1, min(max_h, 4096))
-
-        # Resolve the actual image URL (cached for 24h)
-        image_url = _fetch_product_image(product_url)
-        if not image_url:
+        out_path = _ensure_cached_image_file(product_url, max_w, max_h)
+        if not out_path or not Path(out_path).exists():
             return jsonify({'error': 'image not found'}), 404
-
-        # Disk cache path keyed by image URL + size
-        key = hashlib.sha256(f"{image_url}|{max_w}x{max_h}".encode('utf-8')).hexdigest()
-        # Choose extension based on original URL hint; fallback to jpg
-        guessed_ext = (Path(image_url).suffix or '').lower()
-        ext = '.png' if guessed_ext in ('.png', '.webp') else '.jpg'
-        images_dir = Path('data') / 'images'
-        images_dir.mkdir(parents=True, exist_ok=True)
-        out_path = images_dir / f"{key}{ext}"
-
-        # Serve from cache if exists
-        if out_path.exists():
-            resp = send_file(out_path, conditional=True)
-            resp.headers['Cache-Control'] = 'public, max-age=86400'
-            return resp
-
-        # Download original image
-        try:
-            r = requests.get(image_url, headers={'User-Agent': flask_app.config['USER_AGENT']}, timeout=flask_app.config['TIMEOUT'], stream=True)
-            if r.status_code >= 400:
-                return jsonify({'error': 'failed to fetch source image'}), 502
-            content_type = r.headers.get('Content-Type', '').lower()
-            if not content_type.startswith('image/'):
-                # Try to guess from URL if server doesn't provide an image content-type
-                guessed, _ = mimetypes.guess_type(image_url)
-                if not (guessed and guessed.startswith('image/')):
-                    return jsonify({'error': 'not an image'}), 415
-            raw = BytesIO(r.content)
-        except requests.exceptions.RequestException:
-            return jsonify({'error': 'image fetch error'}), 502
-
-        # Process & resize
-        try:
-            with Image.open(raw) as im:
-                # Handle EXIF orientation and convert as needed
-                im = ImageOps.exif_transpose(im)
-                # Convert palette/LA to RGBA/RGB as needed
-                if im.mode in ('P', 'LA'):
-                    im = im.convert('RGBA')
-                # Resize preserving aspect ratio
-                im.thumbnail((max_w, max_h), Image.LANCZOS)
-                # Decide format by alpha presence
-                has_alpha = im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info)
-                fmt = 'PNG' if has_alpha or ext == '.png' else 'JPEG'
-                if fmt == 'JPEG' and im.mode not in ('RGB', 'L'):
-                    im = im.convert('RGB')
-                # Save to disk
-                save_kwargs = {'quality': 85, 'optimize': True} if fmt == 'JPEG' else {}
-                out_tmp = out_path.with_suffix(out_path.suffix + '.tmp')
-                out_tmp.write_bytes(b'')  # ensure file created for atomic move after save
-                with open(out_tmp, 'wb') as f:
-                    im.save(f, format=fmt, **save_kwargs)
-                out_tmp.replace(out_path)
-        except Exception:
-            # If processing fails, fall back to streaming original
-            try:
-                return send_file(BytesIO(r.content), mimetype=content_type or 'application/octet-stream')
-            except Exception:
-                return jsonify({'error': 'image processing error'}), 500
-
         resp = send_file(out_path, conditional=True)
         resp.headers['Cache-Control'] = 'public, max-age=86400'
         return resp
+
+    # ---------------- Periodic image warmup -----------------
+    def _warmup_images_once():
+        """Prefetch and cache images for enabled products with basic cross-process throttling."""
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+        except Exception:
+            return
+        from pathlib import Path
+        images_dir = Path('data') / 'images'
+        images_dir.mkdir(parents=True, exist_ok=True)
+        stamp_path = images_dir / '.last_warmup'
+        lock = FileLock(str(images_dir / 'warmup'))
+        try:
+            lock.acquire()
+            from datetime import timedelta
+            now = datetime.now(timezone.utc)
+            last = None
+            try:
+                if stamp_path.exists():
+                    ts = stamp_path.read_text().strip()
+                    last = datetime.fromisoformat(ts)
+            except Exception:
+                last = None
+            interval_min = int(os.getenv('IMAGE_WARMUP_INTERVAL_MIN', '360'))
+            if last and (now - last) < timedelta(minutes=interval_min):
+                return
+            max_w = int(os.getenv('IMAGE_CACHE_WIDTH', '600'))
+            max_h = int(os.getenv('IMAGE_CACHE_HEIGHT', '220'))
+            for p in products:
+                try:
+                    if not getattr(p, 'enabled', True):
+                        continue
+                    url = getattr(p, 'url', None)
+                    if not url or not str(url).lower().startswith(('http://','https://')):
+                        continue
+                    _ensure_cached_image_file(url, max_w, max_h)
+                except Exception:
+                    continue
+            try:
+                stamp_path.write_text(datetime.now(timezone.utc).isoformat())
+            except Exception:
+                pass
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
+    def _warmup_loop():
+        import time
+        try:
+            interval_min = int(os.getenv('IMAGE_WARMUP_INTERVAL_MIN', '360'))
+        except ValueError:
+            interval_min = 360
+        time.sleep(5)
+        _warmup_images_once()
+        while True:
+            time.sleep(max(60, interval_min * 60))
+            _warmup_images_once()
+
+    if os.getenv('ENABLE_IMAGE_WARMUP', '1').strip().lower() not in ('0','false','no'):
+        import threading
+        t = threading.Thread(target=_warmup_loop, name='image-warmup', daemon=True)
+        t.start()
     
     return flask_app
 

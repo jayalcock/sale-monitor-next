@@ -5,8 +5,17 @@
 <!-- v2.0 - price_in_base only, no price_cad fallback -->
 {% block content %}
 <div class="row mb-3">
-    <div class="col-12">
+    <div class="col-12 d-flex justify-content-between align-items-center">
         <a href="/" class="btn btn-secondary">&larr; Back to Dashboard</a>
+        <div id="nav-buttons" style="display: none;">
+            <button id="prev-btn" class="btn btn-outline-primary" title="Previous product">
+                &larr; Previous
+            </button>
+            <span id="product-position" class="mx-2 text-muted"></span>
+            <button id="next-btn" class="btn btn-outline-primary" title="Next product">
+                Next &rarr;
+            </button>
+        </div>
     </div>
 </div>
 
@@ -98,6 +107,8 @@
 let chart = null;
 let refreshInterval;
 let CURRENT_BASE_CURRENCY = 'CAD';
+let allProducts = [];
+let currentProductIndex = -1;
 
 function parseUtcIso(dateStr) {
     if (!dateStr) return null;
@@ -116,6 +127,42 @@ function formatPrice(value) {
 function getUrlParameter(name) {
     const params = new URLSearchParams(window.location.search);
     return params.get(name);
+}
+
+function setupNavigation() {
+    const navButtons = document.getElementById('nav-buttons');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const positionSpan = document.getElementById('product-position');
+    
+    if (allProducts.length <= 1) {
+        navButtons.style.display = 'none';
+        return;
+    }
+    
+    navButtons.style.display = 'inline-block';
+    
+    // Update position display
+    positionSpan.textContent = `${currentProductIndex + 1} / ${allProducts.length}`;
+    
+    // Enable/disable buttons based on position
+    prevBtn.disabled = currentProductIndex <= 0;
+    nextBtn.disabled = currentProductIndex >= allProducts.length - 1;
+    
+    // Setup click handlers
+    prevBtn.onclick = () => {
+        if (currentProductIndex > 0) {
+            const prevProduct = allProducts[currentProductIndex - 1];
+            window.location.href = `/product/detail?url=${encodeURIComponent(prevProduct.url)}`;
+        }
+    };
+    
+    nextBtn.onclick = () => {
+        if (currentProductIndex < allProducts.length - 1) {
+            const nextProduct = allProducts[currentProductIndex + 1];
+            window.location.href = `/product/detail?url=${encodeURIComponent(nextProduct.url)}`;
+        }
+    };
 }
 
 function formatPriceDetailed(product) {
@@ -154,8 +201,13 @@ function loadProductInfo(url) {
             return response.json();
         })
         .then(products => {
+            allProducts = products;
             const product = products.find(p => p.url === url);
             if (!product) throw new Error('Product not found');
+            
+            // Find current product index and setup navigation
+            currentProductIndex = products.findIndex(p => p.url === url);
+            setupNavigation();
             
             // Capture base currency
             if (product.base_currency) {
