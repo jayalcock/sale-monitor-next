@@ -686,49 +686,74 @@ def create_app():
         try:
             products = read_products(flask_app.config['PRODUCTS_CSV'])
             state = load_state(flask_app.config['STATE_FILE'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
 
             alerts = []
+            failure_threshold = float(os.getenv('ALERT_FAILURE_THRESHOLD', '50'))  # 50% failure rate
+            min_checks = int(os.getenv('ALERT_MIN_CHECKS', '3'))  # Minimum 3 checks to report
+            
             for p in products:
                 if not p.enabled:
                     continue
 
                 state_data = state.get(p.url, {})
                 current = state_data.get('current_price')
-                last = state_data.get('last_price')
 
-                if current is None:
-                    continue
+                # Check for price alerts
+                if current is not None:
+                    alert_type = None
+                    message = None
 
-                alert_type = None
-                message = None
+                    currency = (state_data.get('currency') or '').upper()
+                    cur_prefix = f"[{currency}] " if currency else ""
 
-                currency = (state_data.get('currency') or '').upper()
-                cur_prefix = f"[{currency}] " if currency else ""
+                    # Check target price
+                    if p.target_price and current <= p.target_price:
+                        alert_type = 'target_met'
+                        message = f'{cur_prefix}Price ${current:.2f} is at or below target ${p.target_price:.2f}'
 
-                # Check target price
-                if p.target_price and current <= p.target_price:
-                    alert_type = 'target_met'
-                    message = f'{cur_prefix}Price ${current:.2f} is at or below target ${p.target_price:.2f}'
+                    # Check discount threshold - use historical max price from DB
+                    elif p.discount_threshold:
+                        # Get historical stats to find the highest price in last 30 days
+                        stats = history.get_stats(p.url, days=30)
+                        max_price = stats.get('max_price')
+                        
+                        if max_price and max_price > current:
+                            discount = ((max_price - current) / max_price) * 100
+                            if discount >= p.discount_threshold:
+                                alert_type = 'discount_met'
+                                message = f'{cur_prefix}Price dropped {discount:.1f}% (${max_price:.2f} → ${current:.2f})'
 
-                # Check discount threshold
-                elif p.discount_threshold and last:
-                    discount = ((last - current) / last) * 100
-                    if discount >= p.discount_threshold:
-                        alert_type = 'discount_met'
-                        message = f'{cur_prefix}Price dropped {discount:.1f}% (${last:.2f} → ${current:.2f})'
-
-                if alert_type:
-                    alerts.append({
-                        'name': p.name,
-                        'url': p.url,
-                        'current_price': current,
-                        'alert_type': alert_type,
-                        'message': message,
-                        'last_checked': state_data.get('last_checked')
-                    })
+                    if alert_type:
+                        alerts.append({
+                            'name': p.name,
+                            'url': p.url,
+                            'current_price': current,
+                            'alert_type': alert_type,
+                            'message': message,
+                            'last_checked': state_data.get('last_checked')
+                        })
+                
+                # Check for high failure rate (last 7 days)
+                try:
+                    failure_stats = history.get_failure_stats(p.url, days=7)
+                    if (failure_stats['total_checks'] >= min_checks and 
+                        failure_stats['failure_rate'] >= failure_threshold):
+                        alerts.append({
+                            'name': p.name,
+                            'url': p.url,
+                            'current_price': current,
+                            'alert_type': 'high_failure',
+                            'message': f"Price extraction failing {failure_stats['failure_rate']:.0f}% of the time ({failure_stats['failed_checks']}/{failure_stats['total_checks']} checks)",
+                            'last_checked': state_data.get('last_checked'),
+                            'failure_stats': failure_stats
+                        })
+                except (sqlite3.Error, KeyError):
+                    # Skip failure check if history unavailable
+                    pass
 
             return jsonify(alerts)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     
     @flask_app.route('/api/export/history')

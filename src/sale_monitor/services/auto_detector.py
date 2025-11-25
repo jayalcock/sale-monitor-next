@@ -21,6 +21,8 @@ class PriceAutoDetector:
         ('span.a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen', 'amazon', 0.93),
         
         # Shopify - more specific selectors first
+        # Inverted Shopify theme (JetBlack): price__regular holds sale price when on sale
+        ('.price.price--on-sale .price__regular', 'shopify', 0.98),
         ('.price__sale .price-item--sale', 'shopify', 0.98),
         ('.price-item--sale', 'shopify', 0.95),
         ('.product-single__price .money', 'shopify', 0.95),
@@ -29,6 +31,8 @@ class PriceAutoDetector:
         ('.price__regular .price-item--regular', 'shopify', 0.96),
         ('.price-item--regular', 'shopify', 0.95),
         ('.price__regular .price-item--price', 'shopify', 0.94),
+        # Generic price__regular for non-sale or inverted themes
+        ('.price__regular', 'shopify', 0.92),
         ('[data-product-price]', 'shopify', 0.90),
         ('.price--main', 'shopify', 0.90),
         ('.product-price', 'shopify', 0.85),

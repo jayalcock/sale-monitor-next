@@ -109,6 +109,7 @@ let refreshInterval;
 let CURRENT_BASE_CURRENCY = 'CAD';
 let allProducts = [];
 let currentProductIndex = -1;
+let RESOLVED_URL = null; // canonical URL found in products.csv
 
 function parseUtcIso(dateStr) {
     if (!dateStr) return null;
@@ -127,6 +128,70 @@ function formatPrice(value) {
 function getUrlParameter(name) {
     const params = new URLSearchParams(window.location.search);
     return params.get(name);
+}
+
+// Normalize URLs for robust matching: lowercase host, drop www, strip trailing slash,
+// and remove common tracking params (keep functional params like 'variant').
+function normalizeUrl(u) {
+    if (!u || typeof u !== 'string') return '';
+    try {
+        // Decode once if needed (avoid double-decoding exceptions)
+        try { u = decodeURIComponent(u); } catch (_) {}
+        const url = new URL(u);
+        // Lowercase protocol/host, drop www.
+        url.protocol = url.protocol.toLowerCase();
+        url.hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+        // Strip trailing slash from path (except root)
+        if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
+            url.pathname = url.pathname.replace(/\/+$/, '');
+        }
+        // Remove known tracking params only
+        const tracking = new Set(['gclid','fbclid','msclkid','utm_source','utm_medium','utm_campaign','utm_term','utm_content','_branch_match_id','sca_ref','ref','ref_']);
+        for (const key of Array.from(url.searchParams.keys())) {
+            if (tracking.has(key.toLowerCase()) || key.toLowerCase().startsWith('utm_')) {
+                url.searchParams.delete(key);
+            }
+        }
+        // Sort remaining params for stability
+        const entries = Array.from(url.searchParams.entries()).sort((a,b)=> a[0].localeCompare(b[0]) || String(a[1]).localeCompare(String(b[1])));
+        url.search = '';
+        for (const [k,v] of entries) url.searchParams.append(k,v);
+        // Reconstruct normalized string (omit default ports)
+        const port = url.port ? `:${url.port}` : '';
+        const search = url.search ? `?${url.searchParams.toString()}` : '';
+        return `${url.protocol}//${url.hostname}${port}${url.pathname}${search}`;
+    } catch (_) {
+        // Fallback: lightweight normalization
+        return String(u).replace(/^https?:\/\//i,'').replace(/^www\./i,'').replace(/\/+$/,'').toLowerCase();
+    }
+}
+
+// Resolve the provided URL against /api/products by normalized comparison.
+function resolveProductUrl(rawUrl) {
+    return fetch(`/api/products`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to fetch product list')))
+        .then(products => {
+            // Save for navigation if not already loaded
+            allProducts = Array.isArray(allProducts) && allProducts.length ? allProducts : products;
+            const rawNorm = normalizeUrl(rawUrl);
+            // 1) Exact match
+            let found = products.find(p => p.url === rawUrl);
+            if (found) return found.url;
+            // 2) Normalized match (host/path/tracking-insensitive)
+            found = products.find(p => normalizeUrl(p.url) === rawNorm);
+            if (found) return found.url;
+            // 3) Ignore query string entirely as last resort
+            try {
+                const ru = new URL(rawUrl);
+                const noQuery = `${ru.origin}${ru.pathname}`;
+                found = products.find(p => {
+                    try { return new URL(p.url).origin + new URL(p.url).pathname === noQuery; } catch { return false; }
+                });
+                if (found) return found.url;
+            } catch {}
+            // Not found; return raw (caller will show error)
+            return rawUrl;
+        });
 }
 
 function setupNavigation() {
@@ -463,28 +528,40 @@ function loadHistory(url) {
 }
 
 function loadData() {
-    const url = getUrlParameter('url');
-    if (!url) {
+    const rawUrl = getUrlParameter('url');
+    if (!rawUrl) {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('error-message').textContent = 'No product URL specified';
         document.getElementById('error-alert').style.display = 'block';
         return;
     }
-    
-    Promise.all([
-        loadProductInfo(url),
-        loadStats(url),
-        loadHistory(url)
-    ])
-    .then(() => {
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('product-detail').style.display = 'block';
-    })
-    .catch(error => {
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('error-message').textContent = error.message;
-        document.getElementById('error-alert').style.display = 'block';
-    });
+
+    resolveProductUrl(rawUrl)
+        .then(resolved => {
+            RESOLVED_URL = resolved;
+            // If resolved differs from raw, update the address bar to canonicalize
+            try {
+                if (resolved && resolved !== rawUrl) {
+                    const u = new URL(window.location.href);
+                    u.searchParams.set('url', resolved);
+                    window.history.replaceState({}, '', u.toString());
+                }
+            } catch {}
+            return Promise.all([
+                loadProductInfo(resolved),
+                loadStats(resolved),
+                loadHistory(resolved)
+            ]);
+        })
+        .then(() => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('product-detail').style.display = 'block';
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-message').textContent = error.message;
+            document.getElementById('error-alert').style.display = 'block';
+        });
 }
 
 // Initial load
@@ -498,7 +575,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggle = document.getElementById('currency-toggle');
     if (toggle) {
         toggle.addEventListener('change', () => {
-            const url = getUrlParameter('url');
+            const url = RESOLVED_URL || getUrlParameter('url');
             if (url) {
                 loadHistory(url);
             }
