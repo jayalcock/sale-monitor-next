@@ -46,8 +46,8 @@
                             <option value="90">Last 90 days</option>
                         </select>
                         <select id="trend-mode" class="form-select form-select-sm" style="width: 180px;" title="Change scale to see variation better">
-                            <option value="absolute" selected>Scale: Absolute (CAD)</option>
-                            <option value="pct">Scale: % change</option>
+                            <option value="absolute">Scale: Absolute (CAD)</option>
+                            <option value="pct" selected>Scale: % change</option>
                             <option value="log">Scale: Log (CAD)</option>
                         </select>
                         <select id="trend-currency" class="form-select form-select-sm" style="width: 190px;" title="Choose display currency">
@@ -271,13 +271,13 @@
 .product-card .merchant-link {
     font-size: 0.85rem;
     color: #6c757d;
-    text-decoration: none;
+    text-decoration: underline;
     margin-bottom: 0.75rem;
     display: block;
 }
 
 .product-card .merchant-link:hover {
-    text-decoration: underline;
+    color: #495057;
 }
 
 .product-card .price-display {
@@ -307,6 +307,7 @@
 let refreshInterval;
 let trendsChart = null;
 let allProducts = [];
+let productAlerts = {}; // Map of URL -> alert object
 let CURRENT_BASE_CURRENCY = 'CAD';
 let sortBy = 'name';
 let sortDesc = false;
@@ -352,29 +353,20 @@ function formatPriceCell(product) {
 }
 
 function getPriceStatus(product) {
-    if (!product.current_price) return 'unknown';
-    
-    const current = parseFloat(product.current_price);
-    
-    if (product.target_price && current <= product.target_price) {
-        return 'target-met';
+    // Check if this product has an active alert from the API
+    const alert = productAlerts[product.url];
+    if (alert) {
+        return alert.alert_type;
     }
     
-    if (product.discount_threshold && product.last_price) {
-        const last = parseFloat(product.last_price);
-        const drop = ((last - current) / last) * 100;
-        if (drop >= product.discount_threshold) {
-            return 'discount-met';
-        }
-    }
-    
-    return 'normal';
+    return product.current_price ? 'normal' : 'unknown';
 }
 
 function getStatusBadge(status) {
     const badges = {
-        'target-met': '<span class="badge bg-success">🎯 Target Met</span>',
-        'discount-met': '<span class="badge bg-warning text-dark">📉 Big Discount</span>',
+        'target_met': '<span class="badge bg-success">🎯 Target Met</span>',
+        'discount_met': '<span class="badge bg-warning text-dark">📉 Big Discount</span>',
+        'high_failure': '<span class="badge bg-danger">⚠️ Failing</span>',
         'normal': '<span class="badge bg-secondary">Watching</span>',
         'unknown': '<span class="badge bg-light text-dark">No Data</span>'
     };
@@ -500,7 +492,7 @@ function renderProductRow(product) {
             data-price="${product.current_price || 0}"
             data-merchant="${merchant.toLowerCase()}">
             <td><a href="${historyUrl}" class="text-decoration-none"><strong>${product.name}</strong></a></td>
-            <td><a href="${product.url}" target="_blank" class="text-muted text-decoration-none">${merchant}</a></td>
+            <td><a href="${product.url}" target="_blank" class="text-muted" style="text-decoration: underline;">${merchant}</a></td>
             <td>${formatPriceCell(product)}</td>
             <td>${statusBadge} ${enabledBadge}</td>
             <td class="text-end">
@@ -551,7 +543,7 @@ function filterAndSortProducts() {
         const matchesStatus = statusFilter === 'all' || 
                             (statusFilter === 'enabled' && product.enabled) ||
                             (statusFilter === 'disabled' && !product.enabled) ||
-                            (statusFilter === 'alerts' && (status === 'target-met' || status === 'discount-met'));
+                            (statusFilter === 'alerts' && (status === 'target_met' || status === 'discount_met' || status === 'high_failure'));
         return matchesSearch && matchesStatus;
     });
     
@@ -633,34 +625,43 @@ function setView(view) {
 }
 
 function loadProducts() {
-    fetch('/api/products')
-        .then(response => {
-            if (!response.ok) throw new Error('Failed to fetch products');
-            return response.json();
-        })
-        .then(products => {
-            allProducts = products;
-            // Capture base currency from API (same for all products)
-            if (products && products.length) {
-                CURRENT_BASE_CURRENCY = (products[0].base_currency || 'CAD');
-                // Update trend mode labels to reflect current base currency
-                const absOpt = document.querySelector('#trend-mode option[value="absolute"]');
-                const logOpt = document.querySelector('#trend-mode option[value="log"]');
-                if (absOpt) absOpt.textContent = `Scale: Absolute (${CURRENT_BASE_CURRENCY})`;
-                if (logOpt) logOpt.textContent = `Scale: Log (${CURRENT_BASE_CURRENCY})`;
-                // Update currency toggle base label
-                const baseCurOpt = document.querySelector('#trend-currency option[value="base"]');
-                if (baseCurOpt) baseCurOpt.textContent = `Currency: Base (${CURRENT_BASE_CURRENCY})`;
-            }
-            document.getElementById('loading').style.display = 'none';
-            renderProducts();
-            updateLastUpdate(products);
-        })
-        .catch(error => {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('error-message').textContent = error.message;
-            document.getElementById('error-alert').style.display = 'block';
-        });
+    // Fetch both products and alerts in parallel
+    Promise.all([
+        fetch('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
+        fetch('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts'))
+    ])
+    .then(([products, alerts]) => {
+        allProducts = products;
+        
+        // Build alert lookup map
+        productAlerts = {};
+        if (Array.isArray(alerts)) {
+            alerts.forEach(alert => {
+                productAlerts[alert.url] = alert;
+            });
+        }
+        
+        // Capture base currency from API (same for all products)
+        if (products && products.length) {
+            CURRENT_BASE_CURRENCY = (products[0].base_currency || 'CAD');
+            // Update trend mode labels to reflect current base currency
+            const absOpt = document.querySelector('#trend-mode option[value="absolute"]');
+            const logOpt = document.querySelector('#trend-mode option[value="log"]');
+            if (absOpt) absOpt.textContent = `Scale: Absolute (${CURRENT_BASE_CURRENCY})`;
+            if (logOpt) logOpt.textContent = `Scale: Log (${CURRENT_BASE_CURRENCY})`;
+            // Update currency toggle base label
+            const baseCurOpt = document.querySelector('#trend-currency option[value="base"]');
+            if (baseCurOpt) baseCurOpt.textContent = `Currency: Base (${CURRENT_BASE_CURRENCY})`;
+        }
+        document.getElementById('loading').style.display = 'none';
+        renderProducts();
+        updateLastUpdate(products);
+    })
+    .catch(error => {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error-message').textContent = error.message || error;
+        document.getElementById('error-alert').style.display = 'block';
+    });
 }
 
 function uniq(arr) {

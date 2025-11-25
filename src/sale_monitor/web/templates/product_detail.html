@@ -5,16 +5,21 @@
 <!-- v2.0 - price_in_base only, no price_cad fallback -->
 {% block content %}
 <div class="row mb-3">
-    <div class="col-12 d-flex justify-content-between align-items-center">
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <a href="/" class="btn btn-secondary">&larr; Back to Dashboard</a>
-        <div id="nav-buttons" style="display: none;">
-            <button id="prev-btn" class="btn btn-outline-primary" title="Previous product">
-                &larr; Previous
+        <div class="d-flex align-items-center gap-2">
+            <button id="update-price-btn" class="btn btn-primary" title="Check price now">
+                🔄 Update Price
             </button>
-            <span id="product-position" class="mx-2 text-muted"></span>
-            <button id="next-btn" class="btn btn-outline-primary" title="Next product">
-                Next &rarr;
-            </button>
+            <div id="nav-buttons" style="display: none;">
+                <button id="prev-btn" class="btn btn-outline-primary" title="Previous product">
+                    &larr; Previous
+                </button>
+                <span id="product-position" class="mx-2 text-muted"></span>
+                <button id="next-btn" class="btn btn-outline-primary" title="Next product">
+                    Next &rarr;
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -399,23 +404,27 @@ function loadHistory(url) {
                 return;
             }
 
-            // Build day -> latest price map (keep newest per day)
+            // Group by day and keep the LOWEST price per day
             const dayMap = {};
             history.forEach(h => {
                 const d = parseUtcIso(h.timestamp);
                 if (!d) return;
                 const key = d.toISOString().slice(0,10);
+                
                 // Use price_in_base for Base mode, native price for Native mode
                 const v = (currencyMode === 'base')
                     ? h.price_in_base
                     : h.price;
-                // History comes newest-first; don't overwrite if we already set today's value
-                if (!(key in dayMap)) {
-                    dayMap[key] = v;
+                
+                if (v != null) {
+                    // Keep the lowest price for each day
+                    if (!(key in dayMap) || Number(v) < dayMap[key]) {
+                        dayMap[key] = Number(v);
+                    }
                 }
             });
 
-            // Build last N days array (local labels, ISO keys for lookup)
+            // Build last N days array
             const daysArr = [];
             const dayKeys = [];
             for (let i = days - 1; i >= 0; i--) {
@@ -428,35 +437,40 @@ function loadHistory(url) {
                 dayKeys.push(utcMidnight.toISOString().slice(0,10));
             }
 
-            // Start with known values, null where missing
-            const values = dayKeys.map(k => (k in dayMap ? Number(dayMap[k]) : null));
-
-            // Linear interpolate between known points
+            // Map day keys to prices (null if no data for that day)
+            const prices = dayKeys.map(k => (k in dayMap ? dayMap[k] : null));
+            
+            // Linear interpolate between known points for missing days
             let lastIdx = null;
-            for (let i = 0; i < values.length; i++) {
-                if (values[i] != null) {
+            for (let i = 0; i < prices.length; i++) {
+                if (prices[i] != null) {
                     if (lastIdx != null && i - lastIdx > 1) {
-                        const startVal = values[lastIdx];
-                        const endVal = values[i];
+                        const startVal = prices[lastIdx];
+                        const endVal = prices[i];
                         const span = i - lastIdx;
                         for (let j = lastIdx + 1; j < i; j++) {
                             const t = (j - lastIdx) / span;
-                            values[j] = startVal + (endVal - startVal) * t;
+                            prices[j] = startVal + (endVal - startVal) * t;
                         }
                     }
                     lastIdx = i;
                 }
             }
 
-            // Carry forward last known value to today to avoid trailing gaps
+            // Carry forward last known value to fill trailing gaps
             if (lastIdx != null) {
-                for (let j = lastIdx + 1; j < values.length; j++) {
-                    values[j] = values[lastIdx];
+                for (let j = lastIdx + 1; j < prices.length; j++) {
+                    prices[j] = prices[lastIdx];
                 }
             }
 
+            if (prices.every(p => p === null)) {
+                document.getElementById('price-chart').insertAdjacentHTML('beforebegin', 
+                    '<p class="text-muted">No valid price data available.</p>');
+                return;
+            }
+
             const labels = daysArr.map(d => d.toLocaleDateString());
-            const prices = values;
             
             // Determine currency suffix for labels
             const currencySuffix = (currencyMode === 'base') ? ` ${CURRENT_BASE_CURRENCY}` : '';
@@ -579,6 +593,46 @@ document.addEventListener('DOMContentLoaded', () => {
             if (url) {
                 loadHistory(url);
             }
+        });
+    }
+    
+    // Update price button handler
+    const updateBtn = document.getElementById('update-price-btn');
+    if (updateBtn) {
+        updateBtn.addEventListener('click', () => {
+            const url = RESOLVED_URL || getUrlParameter('url');
+            if (!url) return;
+            
+            const originalHtml = updateBtn.innerHTML;
+            updateBtn.disabled = true;
+            updateBtn.innerHTML = '⏳ Updating...';
+            
+            fetch('/api/product/check', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url: url})
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+                }
+                return response.json();
+            })
+            .then(result => {
+                if (result.error) {
+                    alert('Error: ' + result.error);
+                } else {
+                    // Reload all data to show updated price
+                    loadData();
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            })
+            .finally(() => {
+                updateBtn.disabled = false;
+                updateBtn.innerHTML = originalHtml;
+            });
         });
     }
 });
