@@ -404,12 +404,15 @@ function loadHistory(url) {
                 return;
             }
 
-            // Group by day and keep the LOWEST price per day
+            // Group by LOCAL day and keep the LOWEST price per day
             const dayMap = {};
             history.forEach(h => {
                 const d = parseUtcIso(h.timestamp);
                 if (!d) return;
-                const key = d.toISOString().slice(0,10);
+                
+                // Convert to local date for grouping (YYYY-MM-DD in local timezone)
+                const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
                 
                 // Use price_in_base for Base mode, native price for Native mode
                 const v = (currencyMode === 'base')
@@ -424,17 +427,16 @@ function loadHistory(url) {
                 }
             });
 
-            // Build last N days array
+            // Build last N days array using LOCAL dates
             const daysArr = [];
             const dayKeys = [];
             for (let i = days - 1; i >= 0; i--) {
                 const local = new Date();
                 local.setHours(0,0,0,0);
                 local.setDate(local.getDate() - i);
-                // Normalize to UTC midnight for a stable ISO date key
-                const utcMidnight = new Date(Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()));
                 daysArr.push(local);
-                dayKeys.push(utcMidnight.toISOString().slice(0,10));
+                const key = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+                dayKeys.push(key);
             }
 
             // Map day keys to prices (null if no data for that day)
