@@ -54,17 +54,17 @@
                             </a>
                         </div>
                         <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                            <a href="/" class="border-primary-500 text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            <a href="/" class="{% if request.path == '/' or request.path.startswith('/product/detail') %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                                 Dashboard
                             </a>
-                            <a href="/alerts" class="border-transparent text-gray-300 hover:border-gray-500 hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium relative">
+                            <a href="/alerts" class="{% if request.path == '/alerts' %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium relative">
                                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                                 </svg>
                                 Alerts
                                 <span id="alerts-badge" class="ml-1.5 hidden items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"></span>
                             </a>
-                            <a href="/manage" class="border-transparent text-gray-300 hover:border-gray-500 hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            <a href="/manage" class="{% if request.path == '/manage' %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
@@ -92,12 +92,12 @@
             <!-- Mobile menu -->
             <div class="sm:hidden hidden" id="mobile-menu">
                 <div class="pt-2 pb-3 space-y-1">
-                    <a href="/" class="bg-primary-50 border-primary-500 text-primary-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Dashboard</a>
-                    <a href="/alerts" class="border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800 block pl-3 pr-4 py-2 border-l-4 text-base font-medium relative">
+                    <a href="/" class="{% if request.path == '/' or request.path.startswith('/product/detail') %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Dashboard</a>
+                    <a href="/alerts" class="{% if request.path == '/alerts' %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium relative">
                         Alerts
                         <span id="alerts-badge-mobile" class="ml-1.5 hidden items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"></span>
                     </a>
-                    <a href="/manage" class="border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800 block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Manage</a>
+                    <a href="/manage" class="{% if request.path == '/manage' %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Manage</a>
                     <a href="/api/export/history" download class="border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800 block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Export</a>
                 </div>
             </div>

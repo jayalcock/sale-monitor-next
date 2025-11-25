@@ -350,7 +350,13 @@ function renderProductRow(product, index) {
             : selectorSource === 'manual'
             ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-600 text-primary-50">Manual</span>'
             : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500 text-gray-900">Bookmarklet</span>';
-        selectorDisplay = `<code class="break-all inline-block align-middle max-w-[260px]" title="${escapeHtml(product.selector)}">${escapeHtml(product.selector)}</code> ${sourceBadge}`;
+        
+        // Truncate long selectors
+        const truncated = product.selector.length > 50 
+            ? product.selector.substring(0, 50) + '...'
+            : product.selector;
+        
+        selectorDisplay = `<code class="text-xs break-all inline-block align-middle max-w-[200px]" title="${escapeHtml(product.selector)}">${escapeHtml(truncated)}</code><br>${sourceBadge}`;
     } else {
         selectorDisplay = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-700 text-blue-100">Auto-detect</span>';
     }
