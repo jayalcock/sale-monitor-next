@@ -704,6 +704,11 @@ function loadTrends() {
                     backgroundColor: color.replace('70%', '70%').replace('50%', '80%'),
                     spanGaps: true,
                     tension: 0.15,
+                    // Hide points by default; show them only on hover for clarity
+                    pointRadius: 0,
+                    pointHoverRadius: 6,
+                    pointHoverBorderWidth: 2,
+                    pointHoverBorderColor: '#fff'
                 };
             });
 
@@ -720,6 +725,21 @@ function loadTrends() {
                     ctx.restore();
                 }
             };
+            // Force single-point hover by activating only the nearest point under the cursor
+            const singlePointHoverPlugin = {
+                id: 'singlePointHover',
+                afterEvent(chartInstance, args) {
+                    const evt = args.event;
+                    if (!evt) return;
+                    const nearest = chartInstance.getElementsAtEventForMode(evt, 'nearest', { intersect: false }, true);
+                    if (nearest && nearest.length) {
+                        chartInstance.setActiveElements([nearest[0]]);
+                    } else {
+                        chartInstance.setActiveElements([]);
+                    }
+                    chartInstance.tooltip?.update();
+                }
+            };
             
             trendsChart = new Chart(ctx, {
                 type: 'line',
@@ -727,7 +747,7 @@ function loadTrends() {
                     labels: allDates.map(d => new Date(d).toLocaleDateString()),
                     datasets
                 },
-                plugins: [darkBackgroundPlugin],
+                plugins: [darkBackgroundPlugin, singlePointHoverPlugin],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -740,14 +760,15 @@ function loadTrends() {
                             } 
                         },
                         tooltip: {
-                            mode: 'index',
-                            intersect: false,
+                            enabled: true,
                             bodyFont: fontSizeForDevice(),
                             backgroundColor: 'rgba(31, 41, 55, 0.95)',
                             titleColor: '#fff',
                             bodyColor: '#d1d5db',
                             borderColor: '#374151',
                             borderWidth: 1,
+                            // Show only the currently active (nearest) element
+                            filter: (item) => item?.parsed?.y != null,
                             callbacks: {
                                 label: context => {
                                     const v = context.parsed.y;
@@ -762,6 +783,7 @@ function loadTrends() {
                             }
                         }
                     },
+                    // Let plugin decide active element; keep nearest without requiring intersection
                     interaction: { mode: 'nearest', intersect: false },
                     scales: {
                         x: {

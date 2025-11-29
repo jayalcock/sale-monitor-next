@@ -490,7 +490,12 @@ function loadHistory(url) {
                         borderColor: 'rgb(56, 189, 248)',
                         backgroundColor: 'rgba(56, 189, 248, 0.12)',
                         tension: 0.15,
-                        fill: true
+                        fill: true,
+                        pointRadius: 0,              // Hide points by default
+                        pointHoverRadius: 6,         // Show point only on hover
+                        pointHoverBackgroundColor: 'rgb(56, 189, 248)',
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2
                     }]
                 },
                 options: {
@@ -502,17 +507,22 @@ function loadHistory(url) {
                             labels: { font: fontSizeForDevice(), color: '#d1d5db' }
                         },
                         tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false,
                             bodyFont: fontSizeForDevice(),
                             backgroundColor: 'rgba(31,41,55,0.95)',
                             titleColor: '#e5e7eb',
                             bodyColor: '#e5e7eb',
                             borderColor: '#111827',
                             borderWidth: 1,
-                            // Only show tooltip for the single point directly hovered
-                            // (avoid showing all points for the x index)
-                            mode: 'nearest',
-                            intersect: true,
+                            itemSort: () => 0,
+                            filter: (tooltipItem, data) => {
+                                // Only show the first item (single dataset, so always one point per index)
+                                return tooltipItem.datasetIndex === 0;
+                            },
                             callbacks: {
+                                title: items => items.length ? items[0].label : '',
                                 label: context => {
                                     const v = context.parsed.y;
                                     return `Price: $${v.toFixed(2)}${currencySuffix}`;
@@ -520,8 +530,10 @@ function loadHistory(url) {
                             }
                         }
                     },
-                    // Require pointer intersection with a point; prevents vertical index hover picking all points
-                    interaction: { mode: 'nearest', intersect: true },
+                    interaction: { 
+                        mode: 'index',
+                        intersect: false
+                    },
                     scales: {
                         x: {
                             grid: { color: '#374151' },
