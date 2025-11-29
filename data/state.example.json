@@ -1,0 +1,20 @@
+{
+  "https://example.com/product-1": {
+    "current_price": 199.99,
+    "last_checked": "2025-01-01T12:00:00Z",
+    "last_price": 219.99,
+    "selector_source": "auto",
+    "currency": "USD",
+    "currency_source": "configured",
+    "price_in_base": 199.99
+  },
+  "https://shop.example.org/item/abc": {
+    "current_price": 149.5,
+    "last_checked": "2025-01-01T12:00:00Z",
+    "last_price": 169.0,
+    "selector_source": "detected",
+    "currency": "CAD",
+    "currency_source": "detected",
+    "price_in_base": 149.5
+  }
+}
