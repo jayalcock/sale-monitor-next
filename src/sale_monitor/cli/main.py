@@ -37,6 +37,9 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
         price, selector_source, detected_currency = extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
         if price is None:
             logging.warning(f"{p.name}: price not found")
+            # Record failure in history for alerts tracking
+            if history:
+                history.record_price(p.url, p.name, None, status='failed', currency=p.currency or 'CAD')
             continue
         
         # Choose currency with preference for detected when available (configurable)

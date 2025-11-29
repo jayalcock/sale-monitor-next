@@ -246,6 +246,9 @@ def create_app():
             price, selector_source, detected_currency = extractor.extract_price_with_currency(product.url, product.selector, default_currency=product.currency)
             
             if price is None:
+                # Record failure in history for alerts tracking
+                history = PriceHistory(flask_app.config['HISTORY_DB'])
+                history.record_price(product.url, product.name, None, status='failed', currency=product.currency or 'CAD')
                 return jsonify({'error': 'Failed to extract price'}), 500
             
             # Choose currency with preference for detected when available (configurable)
@@ -330,10 +333,13 @@ def create_app():
                     product_url = (p.url or '').strip()
                     if not product_url or not product_url.lower().startswith(('http://','https://')):
                         # Invalid URL format; count as failed and skip
+                        history.record_price(p.url or 'invalid', p.name, None, status='failed', currency=p.currency or 'CAD')
                         failed += 1
                         continue
                     price, selector_source, detected_currency = extractor.extract_price_with_currency(product_url, p.selector, default_currency=p.currency)
                     if price is None:
+                        # Record failure in history for alerts tracking
+                        history.record_price(p.url, p.name, None, status='failed', currency=p.currency or 'CAD')
                         failed += 1
                         continue
                     # Choose currency with preference for detected when available (configurable)
@@ -366,6 +372,8 @@ def create_app():
                     history.record_price(p.url, p.name, price, status='success', currency=currency)
                     updated += 1
                 except (requests.exceptions.RequestException, ValueError, sqlite3.Error):
+                    # Record failure in history for alerts tracking
+                    history.record_price(p.url, p.name, None, status='failed', currency=getattr(p, 'currency', None) or 'CAD')
                     failed += 1
                     continue
 
