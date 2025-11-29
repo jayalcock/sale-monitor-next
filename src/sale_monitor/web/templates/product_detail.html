@@ -508,6 +508,10 @@ function loadHistory(url) {
                             bodyColor: '#e5e7eb',
                             borderColor: '#111827',
                             borderWidth: 1,
+                            // Only show tooltip for the single point directly hovered
+                            // (avoid showing all points for the x index)
+                            mode: 'nearest',
+                            intersect: true,
                             callbacks: {
                                 label: context => {
                                     const v = context.parsed.y;
@@ -516,7 +520,8 @@ function loadHistory(url) {
                             }
                         }
                     },
-                    interaction: { mode: 'nearest', intersect: false },
+                    // Require pointer intersection with a point; prevents vertical index hover picking all points
+                    interaction: { mode: 'nearest', intersect: true },
                     scales: {
                         x: {
                             grid: { color: '#374151' },
