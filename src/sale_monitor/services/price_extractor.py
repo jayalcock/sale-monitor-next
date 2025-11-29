@@ -108,6 +108,12 @@ class PriceExtractor:
                 # Both methods failed
                 logging.warning("Failed to extract price from %s (selector: %s, auto-detection: %s)", 
                               url, selector or "none", "failed" if not detected_selector else "parse failed")
+
+                # Fallback: try JSON-LD structured data for price (e.g., many retailers incl. JensonUSA)
+                price_jsonld = self._extract_price_from_jsonld(resp.text)
+                if price_jsonld is not None:
+                    logging.info("Extracted price from JSON-LD on %s", url)
+                    return price_jsonld, 'auto'
                 
             except requests.exceptions.RequestException as e:
                 logging.error("Request failed (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
@@ -336,3 +342,55 @@ class PriceExtractor:
             return float(s)
         except ValueError:
             return None
+
+    # --- JSON-LD price extraction helpers ---
+    def _extract_price_from_jsonld(self, html: str) -> Optional[float]:
+        """Extract price from application/ld+json blocks when present.
+
+        Looks for Offer/Offers.price, AggregateOffer.lowPrice, priceSpecification.price,
+        or generic 'price' fields. Returns the first reasonable positive price found.
+        """
+        if not html:
+            return None
+        prices = []
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = m.group(1).strip()
+            try:
+                data = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            self._collect_prices_from_json(data, prices)
+            if prices:
+                # Prefer the smallest positive plausible price to avoid capturing strikethrough lists
+                positives = [p for p in prices if isinstance(p, (int, float)) and p > 0]
+                if positives:
+                    return float(min(positives))
+        return None
+
+    def _collect_prices_from_json(self, obj, out_list):
+        """Recursively collect numeric price candidates from JSON-LD structures."""
+        try:
+            if isinstance(obj, dict):
+                # Common locations
+                if 'price' in obj:
+                    try:
+                        out_list.append(float(obj['price']))
+                    except (TypeError, ValueError):
+                        pass
+                if 'lowPrice' in obj:
+                    try:
+                        out_list.append(float(obj['lowPrice']))
+                    except (TypeError, ValueError):
+                        pass
+                # Nested structures
+                for key in ('offers', 'Offer', 'AggregateOffer', 'priceSpecification'):
+                    if key in obj:
+                        self._collect_prices_from_json(obj[key], out_list)
+                for v in obj.values():
+                    self._collect_prices_from_json(v, out_list)
+            elif isinstance(obj, list):
+                for it in obj:
+                    self._collect_prices_from_json(it, out_list)
+        except Exception:
+            # Be resilient to malformed vendor JSON
+            pass
