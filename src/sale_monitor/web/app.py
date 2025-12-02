@@ -35,6 +35,76 @@ def create_app():
     # Initial/base currency from env or config file
     initial_base_currency = os.getenv('BASE_CURRENCY') or get_base_currency(flask_app.config['CONFIG_FILE'])
     flask_app.config['BASE_CURRENCY'] = initial_base_currency.upper()
+
+    def _build_comparison_groups(state: dict, products: list, base_currency: str) -> list:
+        """Group products by shared identifiers (mpn/sku/gtin).
+
+        Returns a list of groups: [{group_key, identifiers, items: [{name,url,current_price,price_in_base,currency,last_checked}]}]
+        """
+        # Map url->product for names
+        name_by_url = {p.url: p.name for p in products}
+
+        # Helper to compute price_in_base from state when available
+        def _item_row(u: str, st: dict) -> dict:
+            cur_price = st.get('current_price')
+            cur_currency = (st.get('currency') or 'CAD').upper()
+            price_in_base = st.get('price_in_base')
+            return {
+                'name': name_by_url.get(u, u),
+                'url': u,
+                'current_price': cur_price,
+                'currency': cur_currency,
+                'price_in_base': price_in_base if isinstance(price_in_base, (int, float)) else None,
+                'last_checked': st.get('last_checked'),
+            }
+
+        groups = {}
+        for url, st in state.items():
+            if not isinstance(st, dict):
+                continue
+            # Manual group key takes precedence when present
+            manual_key = st.get('group_key')
+            ident = st.get('identifiers') or {}
+            # Choose strongest identifier available
+            key = manual_key or ident.get('mpn') or ident.get('sku') or ident.get('gtin') or ident.get('gtin13')
+            if not key:
+                continue
+            g = groups.setdefault(key, {'group_key': key, 'identifiers': ident, 'items': []})
+            g['items'].append(_item_row(url, st))
+
+        # Only keep groups with at least 2 items (competitive set)
+        result = [g for g in groups.values() if len(g['items']) >= 2]
+        # Sort items by price_in_base when available
+        for g in result:
+            try:
+                g['items'].sort(key=lambda x: (float(x['price_in_base']) if isinstance(x.get('price_in_base'), (int, float, str)) and str(x.get('price_in_base')).strip() != '' else float('inf')))
+            except Exception:
+                pass
+        return result
+
+    def _normalize_name(name: str) -> str:
+        """Normalize product names for fuzzy comparison.
+
+        Lowercase, remove punctuation, common tokens (brand noise), and collapse spaces.
+        """
+        import re
+        if not isinstance(name, str):
+            return ''
+        n = name.lower()
+        # Remove punctuation
+        n = re.sub(r"[\-_/\\.,'\"]", " ", n)
+        # Remove common noise tokens
+        stop = {
+            'inc', 'llc', 'ltd', 'co', 'company', 'shop', 'store', 'official',
+            'bike', 'cycles', 'bikes', 'usa', 'canada', 'u.s.', 'ca',
+        }
+        tokens = [t for t in re.split(r"\s+", n) if t and t not in stop]
+        return ' '.join(tokens).strip()
+
+    def _similar(a: str, b: str) -> float:
+        """Return similarity ratio between two strings using SequenceMatcher."""
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, a, b).ratio()
     
     @flask_app.route('/')
     def index():
@@ -55,6 +125,16 @@ def create_app():
     def alerts():
         """Price alerts dashboard page."""
         return render_template('alerts.html')
+
+    @flask_app.route('/compare')
+    def compare():
+        """Competitive comparison page."""
+        return render_template('compare.html')
+    
+    @flask_app.route('/failures')
+    def failures():
+        """Failure diagnostics page."""
+        return render_template('failures.html')
     
     @flask_app.route('/api/products')
     def api_products():
@@ -282,7 +362,8 @@ def create_app():
                 'selector_source': selector_source,
                 'currency': currency,
                 'currency_source': currency_source,
-                'price_in_base': price_in_base
+                'price_in_base': price_in_base,
+                'identifiers': getattr(extractor, 'last_identifiers', {}) or state.get(url, {}).get('identifiers')
             }
             save_state(flask_app.config['STATE_FILE'], state)
             
@@ -367,7 +448,8 @@ def create_app():
                         'selector_source': selector_source or prev_state.get('selector_source'),
                         'currency': currency,
                         'currency_source': currency_source,
-                        'price_in_base': price_in_base
+                        'price_in_base': price_in_base,
+                        'identifiers': getattr(extractor, 'last_identifiers', {}) or prev_state.get('identifiers')
                     }
                     history.record_price(p.url, p.name, price, status='success', currency=currency)
                     updated += 1
@@ -760,7 +842,197 @@ def create_app():
                     # Skip failure check if history unavailable
                     pass
 
+            # Optional competitive alerts (gated by env to avoid test disruption)
+            enable_competitive = os.getenv('ENABLE_COMPETITIVE_ALERTS', '0').strip().lower() in ('1','true','yes')
+            if enable_competitive:
+                try:
+                    base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
+                    groups = _build_comparison_groups(state, products, base_currency)
+                    threshold_pct = float(os.getenv('ALERT_COMPETITIVE_DROP_PERCENT', '5'))
+                    for g in groups:
+                        # Use items with valid base price
+                        priced = [it for it in g['items'] if isinstance(it.get('price_in_base'), (int, float))]
+                        if len(priced) < 2:
+                            continue
+                        # Sorted ascending from helper; first is lowest
+                        lowest = priced[0]
+                        second = priced[1]
+                        try:
+                            if second['price_in_base'] > 0:
+                                diff_pct = ((second['price_in_base'] - lowest['price_in_base']) / second['price_in_base']) * 100
+                            else:
+                                diff_pct = 0.0
+                        except Exception:
+                            diff_pct = 0.0
+                        if diff_pct >= threshold_pct:
+                            alerts.append({
+                                'name': lowest['name'],
+                                'url': lowest['url'],
+                                'current_price': lowest['current_price'],
+                                'alert_type': 'competitive_lowest',
+                                'message': f"Lowest among competitors (−{diff_pct:.1f}% vs next). Group: {g['group_key']}",
+                                'last_checked': lowest.get('last_checked'),
+                                'group_key': g['group_key']
+                            })
+                except Exception:
+                    pass
+
             return jsonify(alerts)
+        except (OSError, ValueError, sqlite3.Error) as e:
+            return jsonify({'error': str(e)}), 500
+
+    @flask_app.route('/api/compare/groups')
+    def api_compare_groups():
+        """Return competitive groups built from identifiers in state."""
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            state = load_state(flask_app.config['STATE_FILE'])
+            base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
+            try:
+                groups = _build_comparison_groups(state or {}, products or [], base_currency)
+                return jsonify(groups)
+            except Exception as e:
+                logging.error("Comparison group build failed: %s", e)
+                # Return empty groups to avoid breaking UI; details logged server-side
+                return jsonify([])
+        except (OSError, ValueError, sqlite3.Error) as e:
+            return jsonify({'error': str(e)}), 500
+
+    @flask_app.route('/api/compare/backfill-identifiers', methods=['POST'])
+    def api_compare_backfill_identifiers():
+        """Backfill product identifiers in state by scraping pages.
+
+        Returns {updated: n, failed: m} and does not modify prices.
+        """
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            state = load_state(flask_app.config['STATE_FILE'])
+            extractor = PriceExtractor(
+                user_agent=flask_app.config['USER_AGENT'],
+                timeout=flask_app.config['TIMEOUT'],
+                max_retries=flask_app.config['MAX_RETRIES']
+            )
+            updated = 0
+            failed = 0
+            for p in products:
+                try:
+                    idents = extractor.extract_identifiers(p.url)
+                    if idents:
+                        prev = state.get(p.url, {})
+                        prev['identifiers'] = idents
+                        # Preserve existing fields
+                        state[p.url] = prev
+                        updated += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+            save_state(flask_app.config['STATE_FILE'], state)
+            return jsonify({'success': True, 'updated': updated, 'failed': failed})
+        except (OSError, ValueError) as e:
+            return jsonify({'error': str(e)}), 500
+
+    @flask_app.route('/api/compare/suggest')
+    def api_compare_suggest():
+        """Suggest likely competitor pairs based on fuzzy name matching.
+
+        Returns list of suggestions: [{nameA, urlA, nameB, urlB, similarity}]
+        """
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            # Build normalized names
+            items = []
+            for p in products:
+                items.append({'url': p.url, 'name': p.name, 'norm': _normalize_name(p.name)})
+            suggestions = []
+            threshold = float(os.getenv('COMPARE_NAME_SIMILARITY', '0.88'))
+            # Compare pairs
+            for i in range(len(items)):
+                for j in range(i+1, len(items)):
+                    a, b = items[i], items[j]
+                    sim = _similar(a['norm'], b['norm'])
+                    if sim >= threshold:
+                        suggestions.append({
+                            'nameA': a['name'], 'urlA': a['url'],
+                            'nameB': b['name'], 'urlB': b['url'],
+                            'similarity': round(sim, 3)
+                        })
+            # Sort by similarity desc
+            suggestions.sort(key=lambda s: s['similarity'], reverse=True)
+            return jsonify(suggestions)
+        except (OSError, ValueError) as e:
+            return jsonify({'error': str(e)}), 500
+
+    @flask_app.route('/api/compare/link', methods=['POST'])
+    def api_compare_link():
+        """Link two product URLs under a shared manual group_key.
+
+        Body: { urlA, urlB, group_key? }
+        """
+        try:
+            data = request.get_json() or {}
+            urlA = (data.get('urlA') or '').strip()
+            urlB = (data.get('urlB') or '').strip()
+            group_key = (data.get('group_key') or '').strip()
+            if not urlA or not urlB:
+                return jsonify({'error': 'urlA and urlB required'}), 400
+            # Generate group key if absent
+            if not group_key:
+                # Use normalized name pair hash for stability
+                import hashlib
+                pair = '|'.join(sorted([urlA, urlB]))
+                group_key = 'manual:' + hashlib.sha1(pair.encode('utf-8')).hexdigest()[:8]
+            state = load_state(flask_app.config['STATE_FILE'])
+            a = state.get(urlA, {})
+            b = state.get(urlB, {})
+            a['group_key'] = group_key
+            b['group_key'] = group_key
+            state[urlA] = a
+            state[urlB] = b
+            save_state(flask_app.config['STATE_FILE'], state)
+            return jsonify({'success': True, 'group_key': group_key})
+        except (OSError, ValueError) as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @flask_app.route('/api/failures')
+    def api_failures():
+        """Get detailed failure information for all products."""
+        try:
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            state = load_state(flask_app.config['STATE_FILE'])
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            
+            days = int(request.args.get('days', 7))
+            
+            failures = []
+            for p in products:
+                try:
+                    failure_stats = history.get_failure_stats(p.url, days=days)
+                    state_data = state.get(p.url, {})
+                    
+                    # Include products with at least one failure
+                    if failure_stats['failed_checks'] > 0:
+                        failures.append({
+                            'name': p.name,
+                            'url': p.url,
+                            'enabled': p.enabled,
+                            'total_checks': failure_stats['total_checks'],
+                            'failed_checks': failure_stats['failed_checks'],
+                            'failure_rate': failure_stats['failure_rate'],
+                            'last_success': failure_stats.get('last_success'),
+                            'last_failure': failure_stats.get('last_failure'),
+                            'last_checked': state_data.get('last_checked'),
+                            'current_price': state_data.get('current_price'),
+                            'currency': state_data.get('currency', 'CAD')
+                        })
+                except (sqlite3.Error, KeyError):
+                    # Skip if history unavailable for this product
+                    continue
+            
+            # Sort by failure rate descending, then by failed count
+            failures.sort(key=lambda x: (x['failure_rate'], x['failed_checks']), reverse=True)
+            
+            return jsonify(failures)
         except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     

@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Failure Diagnostics - Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h1 class="text-2xl font-semibold text-white">🔧 Failure Diagnostics</h1>
+    <p class="text-gray-400">Products experiencing price extraction failures</p>
+    <div class="mt-4 flex items-center gap-2 flex-wrap">
+        <a href="/" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm font-medium">← Back to Dashboard</a>
+        <button class="inline-flex items-center px-3 py-2 rounded-md bg-primary-600 text-white hover:bg-primary-700 text-sm font-medium" onclick="loadFailures()">🔄 Refresh</button>
+        <select id="days-filter" class="rounded-md bg-gray-700 border-gray-600 text-white text-sm px-3 py-2" onchange="loadFailures()">
+            <option value="1">Last 24 hours</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+        </select>
+    </div>
+    <div id="error-alert" class="mt-4 hidden rounded-md border border-red-700 bg-red-900/40 text-red-200 px-4 py-3" role="alert">
+        <strong class="font-medium">Error:</strong> <span id="error-message" class="ml-1"></span>
+    </div>
+</div>
+
+<div id="loading" class="flex justify-center my-8">
+    <svg class="animate-spin h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+    </svg>
+    <span class="sr-only">Loading...</span>
+</div>
+
+<div id="failures-container" style="display: none;">
+    <div id="no-failures" class="hidden rounded-md border border-green-700 bg-green-900/40 text-green-200 px-4 py-3">
+        <strong class="font-medium">✓ All systems operational!</strong> <span>No price extraction failures detected.</span>
+    </div>
+    
+    <div id="summary" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" style="display: none;">
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <div class="text-gray-400 text-sm">Total Products with Failures</div>
+            <div class="text-2xl font-bold text-white" id="total-failures">0</div>
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <div class="text-gray-400 text-sm">Average Failure Rate</div>
+            <div class="text-2xl font-bold text-red-400" id="avg-failure-rate">0%</div>
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <div class="text-gray-400 text-sm">Critical Failures (>75%)</div>
+            <div class="text-2xl font-bold text-red-600" id="critical-failures">0</div>
+        </div>
+    </div>
+    
+    <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-700">
+            <thead class="bg-gray-900">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Product</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Failure Rate</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Checks</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Last Success</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Last Failure</th>
+                    <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="failures-tbody" class="bg-gray-800 divide-y divide-gray-700">
+                <!-- Populated by JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function formatDate(dateStr) {
+    if (!dateStr) return 'Never';
+    const date = new Date(dateStr);
+    return date.toLocaleString();
+}
+
+function formatPrice(price) {
+    if (price === null || price === undefined) return 'N/A';
+    return `$${parseFloat(price).toFixed(2)}`;
+}
+
+function getFailureRateBadge(rate) {
+    if (rate >= 75) {
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-600 text-red-50">${rate.toFixed(1)}%</span>`;
+    } else if (rate >= 50) {
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-500 text-gray-900">${rate.toFixed(1)}%</span>`;
+    } else if (rate >= 25) {
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-500 text-gray-900">${rate.toFixed(1)}%</span>`;
+    } else {
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-600 text-blue-50">${rate.toFixed(1)}%</span>`;
+    }
+}
+
+function renderFailureRow(failure) {
+    const statusBadge = failure.enabled
+        ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-600 text-green-50">Enabled</span>'
+        : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-600 text-gray-100">Disabled</span>';
+    
+    const currentPrice = failure.current_price !== null && failure.current_price !== undefined
+        ? `<div class="text-xs text-gray-400">Current: ${formatPrice(failure.current_price)} ${failure.currency}</div>`
+        : '';
+    
+    return `
+        <tr>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-white">
+                    <a href="/product/detail?url=${encodeURIComponent(failure.url)}" class="hover:text-primary-400">${failure.name}</a>
+                </div>
+                ${currentPrice}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                ${statusBadge}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                ${getFailureRateBadge(failure.failure_rate)}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                <div>${failure.failed_checks} failed</div>
+                <div class="text-xs text-gray-500">${failure.total_checks} total</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                ${formatDate(failure.last_success)}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                ${formatDate(failure.last_failure)}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <button onclick="retryProduct('${failure.url}', this)" class="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white mr-2">
+                    🔄 Retry
+                </button>
+                <a href="/manage" class="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-yellow-500 hover:bg-yellow-400 text-gray-900">
+                    Fix
+                </a>
+            </td>
+        </tr>
+    `;
+}
+
+function retryProduct(url, button) {
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '⏳ Checking...';
+    
+    fetch('/api/product/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        }
+        return response.json();
+    })
+    .then(result => {
+        if (result.error) {
+            alert('Error: ' + result.error);
+        } else {
+            alert(`✓ Success! Price: ${formatPrice(result.price)} ${result.currency}`);
+            loadFailures(); // Refresh the list
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    })
+    .finally(() => {
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+    });
+}
+
+function loadFailures() {
+    const days = document.getElementById('days-filter').value;
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('failures-container').style.display = 'none';
+    
+    fetch(`/api/failures?days=${days}`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch failures');
+            return response.json();
+        })
+        .then(failures => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('failures-container').style.display = 'block';
+            
+            if (failures.length === 0) {
+                document.getElementById('no-failures').style.display = 'block';
+                document.getElementById('summary').style.display = 'none';
+                document.getElementById('failures-tbody').innerHTML = '';
+            } else {
+                document.getElementById('no-failures').style.display = 'none';
+                document.getElementById('summary').style.display = 'grid';
+                
+                // Calculate summary stats
+                const totalFailures = failures.length;
+                const avgFailureRate = failures.reduce((sum, f) => sum + f.failure_rate, 0) / totalFailures;
+                const criticalFailures = failures.filter(f => f.failure_rate >= 75).length;
+                
+                document.getElementById('total-failures').textContent = totalFailures;
+                document.getElementById('avg-failure-rate').textContent = avgFailureRate.toFixed(1) + '%';
+                document.getElementById('critical-failures').textContent = criticalFailures;
+                
+                // Render table rows
+                document.getElementById('failures-tbody').innerHTML = failures.map(renderFailureRow).join('');
+            }
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-message').textContent = error.message;
+            document.getElementById('error-alert').style.display = 'block';
+        });
+}
+
+// Initial load
+loadFailures();
+
+// Auto-refresh every 60 seconds
+setInterval(loadFailures, 60000);
+</script>
+{% endblock %}

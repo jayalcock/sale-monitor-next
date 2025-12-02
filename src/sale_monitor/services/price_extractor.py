@@ -2,7 +2,7 @@ import logging
 import re
 import time
 import json
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -30,6 +30,8 @@ class PriceExtractor:
         self.timeout = timeout
         self.max_retries = max_retries
         self.auto_detector = PriceAutoDetector()
+        # Stores last-detected identifiers from HTML (sku/mpn/gtin/brand/model)
+        self.last_identifiers: Dict[str, Any] = {}
 
     def extract_price(self, url: str, selector: str = "") -> Tuple[Optional[float], str]:
         """Extract price from a webpage using CSS selector or auto-detection.
@@ -153,6 +155,11 @@ class PriceExtractor:
                 resp = self.session.get(url, timeout=detection_timeout)
                 if resp.status_code == 200 and resp.text:
                     detected_currency = self._detect_currency_from_html(resp.text, url)
+                    # Also extract identifiers from HTML (JSON-LD/meta common fields)
+                    try:
+                        self.last_identifiers = self._extract_identifiers_from_html(resp.text)
+                    except Exception:
+                        self.last_identifiers = {}
                     if not detected_currency:
                         # Heuristic body scan if structured tags missing
                         body_l = resp.text.lower()
@@ -394,3 +401,87 @@ class PriceExtractor:
         except Exception:
             # Be resilient to malformed vendor JSON
             pass
+
+    # --- Identifier extraction helpers ---
+    def _extract_identifiers_from_html(self, html: str) -> Dict[str, Any]:
+        """Extract common product identifiers from HTML content.
+
+        Returns a dict containing any of: sku, mpn, gtin, gtin13, brand, model, name.
+        Prefers JSON-LD data; falls back to meta tags when present.
+        """
+        result: Dict[str, Any] = {}
+        if not html:
+            return result
+
+        # 1) JSON-LD blocks
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = m.group(1).strip()
+            try:
+                data = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            # Collect known fields recursively
+            self._collect_identifiers_from_json(data, result)
+            # If we have at least one strong identifier, we can stop early
+            if any(k in result for k in ('mpn', 'sku', 'gtin', 'gtin13')):
+                break
+
+        # 2) Meta tags fallbacks
+        # sku
+        m = re.search(r'<meta[^>]+itemprop=["\']sku["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+        if m and 'sku' not in result:
+            result['sku'] = m.group(1).strip()
+        # brand
+        m = re.search(r'<meta[^>]+itemprop=["\']brand["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+        if m and 'brand' not in result:
+            result['brand'] = m.group(1).strip()
+        # model
+        m = re.search(r'<meta[^>]+itemprop=["\']model["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+        if m and 'model' not in result:
+            result['model'] = m.group(1).strip()
+
+        return result
+
+    def _collect_identifiers_from_json(self, obj, out: Dict[str, Any]) -> None:
+        """Walk JSON-LD structures and collect identifiers into 'out'."""
+        try:
+            if isinstance(obj, dict):
+                for key in ('sku', 'mpn', 'gtin', 'gtin13', 'gtin14', 'gtin12'):
+                    if key in obj and key not in out and isinstance(obj[key], str):
+                        out[key] = obj[key].strip()
+                # brand can be string or object with name
+                if 'brand' in obj and 'brand' not in out:
+                    b = obj['brand']
+                    if isinstance(b, str):
+                        out['brand'] = b.strip()
+                    elif isinstance(b, dict) and 'name' in b and isinstance(b['name'], str):
+                        out['brand'] = b['name'].strip()
+                # model/name
+                for key in ('model', 'name'):
+                    if key in obj and key not in out and isinstance(obj[key], str):
+                        out[key] = obj[key].strip()
+                # Nested common keys
+                for k in ('offers', 'Product'):
+                    if k in obj:
+                        self._collect_identifiers_from_json(obj[k], out)
+                for v in obj.values():
+                    self._collect_identifiers_from_json(v, out)
+            elif isinstance(obj, list):
+                for it in obj:
+                    self._collect_identifiers_from_json(it, out)
+        except Exception:
+            pass
+
+    # Public helper to fetch identifiers without price extraction
+    def extract_identifiers(self, url: str) -> Dict[str, Any]:
+        """Fetch the page and return detected identifiers (sku/mpn/gtin/brand/model).
+
+        Does not parse or return price; lightweight fetch with current timeout settings.
+        """
+        try:
+            resp = self.session.get(url, timeout=min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5)
+            if resp.status_code == 200 and resp.text:
+                return self._extract_identifiers_from_html(resp.text)
+        except requests.exceptions.RequestException:
+            pass
+        return {}

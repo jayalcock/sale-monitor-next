@@ -64,6 +64,18 @@
                                 Alerts
                                 <span id="alerts-badge" class="ml-1.5 hidden items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"></span>
                             </a>
+                            <a href="/compare" class="{% if request.path == '/compare' %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 7a1 1 0 011-1h10a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 7a1 1 0 011-1h7a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z"></path>
+                                </svg>
+                                Compare
+                            </a>
+                            <a href="/failures" class="{% if request.path == '/failures' %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                Failures
+                            </a>
                             <a href="/manage" class="{% if request.path == '/manage' %}border-primary-500 text-white{% else %}border-transparent text-gray-300 hover:border-gray-500 hover:text-white{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
@@ -97,6 +109,8 @@
                         Alerts
                         <span id="alerts-badge-mobile" class="ml-1.5 hidden items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"></span>
                     </a>
+                    <a href="/compare" class="{% if request.path == '/compare' %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Compare</a>
+                    <a href="/failures" class="{% if request.path == '/failures' %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Failures</a>
                     <a href="/manage" class="{% if request.path == '/manage' %}bg-primary-50 border-primary-500 text-primary-700{% else %}border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Manage</a>
                     <a href="/api/export/history" download class="border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800 block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Export</a>
                 </div>

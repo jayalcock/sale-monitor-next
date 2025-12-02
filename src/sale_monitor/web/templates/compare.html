@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}Compare{% endblock %}
+{% block content %}
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex items-center mb-6">
+      <h2 class="text-2xl font-semibold text-white mr-4">Competitive Comparison</h2>
+      <button class="bg-primary-600 hover:bg-primary-500 text-white text-sm px-3 py-1 rounded" id="refreshBtn">Refresh</button>
+      <a class="ml-2 text-sm px-3 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-700" href="/manage">Manage Products</a>
+    </div>
+    <p class="text-gray-300 text-sm mb-4">Groups are formed automatically using product identifiers (MPN/SKU/GTIN). Only groups with 2+ vendors are shown.</p>
+
+    <div id="groupsContainer"></div>
+
+    <div class="mt-8">
+      <h3 class="text-lg font-semibold text-white mb-2">Suggested Links (name-based)</h3>
+      <div id="suggestionsContainer" class="text-sm text-gray-200"></div>
+    </div>
+  </div>
+
+  <script>
+  async function fetchGroups() {
+    try {
+      const res = await fetch('/api/compare/groups');
+      if (!res.ok) {
+        const txt = await res.text();
+        showError('Server error: ' + txt.slice(0,200));
+        return;
+      }
+      const groups = await res.json();
+      if (groups && groups.error) {
+        showError('Group build failed: ' + (groups.details || groups.error));
+        return;
+      }
+      renderGroups(groups);
+      fetchSuggestions();
+    } catch (e) {
+      showError('Fetch failed: ' + e);
+    }
+  }
+
+  function fmtPrice(p) {
+    if (p === null || p === undefined) return '-';
+    try { return `$${Number(p).toFixed(2)}`; } catch { return String(p); }
+  }
+
+  function renderGroups(groups) {
+    const container = document.getElementById('groupsContainer');
+    if (!Array.isArray(groups) || groups.length === 0) {
+      container.innerHTML = `<div class="p-4 rounded bg-gray-800 text-gray-200 text-sm">No competitor groups detected yet. Run a price check and ensure identifiers are present. Add more products via <a class="underline text-primary-400" href="/manage">Manage</a>.</div>`;
+      return;
+    }
+
+    const rows = groups.map(g => {
+      const items = g.items.map((it, idx) => {
+        const isLowest = idx === 0 && it.price_in_base !== null && it.price_in_base !== undefined;
+        return `
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 ${isLowest ? 'bg-gray-700' : 'bg-gray-800'}">\n          <div class="flex-1">\n            <a class="text-primary-300 hover:text-primary-200 font-medium" href="${it.url}" target="_blank" rel="noopener">${it.name}</a>\n            <div class="text-xs text-gray-300 mt-1">${it.currency} ${fmtPrice(it.current_price)} <span class="text-gray-500">|</span> Base: ${fmtPrice(it.price_in_base)}</div>\n          </div>\n          <button class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-600" onclick="retry('${it.url}')">Retry</button>\n        </div>`;
+      }).join('');
+
+      const id = g.identifiers || {};
+      const idSummary = ['mpn','sku','gtin','gtin13','brand','model']
+        .filter(k => id[k])
+        .map(k => `<span class="mr-2"><span class="text-gray-400">${k.toUpperCase()}:</span> <span class="text-gray-200">${id[k]}</span></span>`)
+        .join('');
+
+      return `
+        <div class="mb-5 rounded border border-gray-700 overflow-hidden">\n        <div class="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">\n          <div>\n            <div class="text-sm text-gray-200"><span class="font-semibold text-white">Group:</span> ${g.group_key}</div>\n            <div class="text-xs mt-1 flex flex-wrap">${idSummary}</div>\n          </div>\n          <button class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-700" data-group="${cssSafe(g.group_key)}" onclick="toggleGroup('${cssSafe(g.group_key)}')">Toggle Vendors</button>\n        </div>\n        <div id="g_${cssSafe(g.group_key)}" class="group-vendors">${items}</div>\n      </div>`;
+    }).join('');
+
+    container.innerHTML = rows;
+  }
+
+  function cssSafe(s) {
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function toggleGroup(key) {
+    const el = document.getElementById('g_' + key);
+    if (!el) return;
+    el.classList.toggle('hidden');
+  }
+
+  async function retry(url) {
+    try {
+      const res = await fetch('/api/product/check', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url})
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await fetchGroups();
+    } catch (e) { alert('Retry failed: ' + e); }
+  }
+
+  function showError(msg) {
+    const container = document.getElementById('groupsContainer');
+    container.innerHTML = `<div class="p-4 rounded bg-red-900 text-red-200 text-sm">${msg}</div>`;
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', fetchGroups);
+  fetchGroups();
+
+async function fetchSuggestions() {
+  try {
+    const res = await fetch('/api/compare/suggest');
+    if (!res.ok) return;
+    const sugg = await res.json();
+    const box = document.getElementById('suggestionsContainer');
+    if (!Array.isArray(sugg) || sugg.length === 0) {
+      box.innerHTML = '<div class="text-gray-400">No suggestions yet.</div>';
+      return;
+    }
+    box.innerHTML = sugg.slice(0, 10).map(s => `
+      <div class="flex items-center justify-between border-b border-gray-700 py-2">
+        <div class="mr-2">
+          <div><a class="text-primary-300 hover:text-primary-200" href="${s.urlA}" target="_blank">${s.nameA}</a></div>
+          <div class="text-gray-400">↔︎ similarity ${s.similarity}</div>
+          <div><a class="text-primary-300 hover:text-primary-200" href="${s.urlB}" target="_blank">${s.nameB}</a></div>
+        </div>
+        <div>
+          <button class="text-xs px-2 py-1 rounded border border-primary-600 text-primary-200 hover:bg-primary-700" onclick="linkPair('${s.urlA}', '${s.urlB}')">Link</button>
+        </div>
+      </div>
+    `).join('');
+  } catch {}
+}
+
+async function linkPair(urlA, urlB) {
+  try {
+    const res = await fetch('/api/compare/link', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({urlA, urlB})
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await fetchGroups();
+    await fetchSuggestions();
+  } catch (e) {
+    alert('Link failed: ' + e);
+  }
+}
+  </script>
+{% endblock %}
