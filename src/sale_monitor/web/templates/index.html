@@ -1149,10 +1149,14 @@ function renderGroupParentRow(group) {
     const toggleBtn = `<button id="${groupId}-toggle" class="inline-flex items-center mr-2 px-2 py-1 text-sm font-medium rounded-md text-primary-400 bg-gray-900 border border-primary-600 hover:bg-gray-700" onclick="toggleGroupRows('${groupId}')" aria-label="Toggle group"><span class="chev">▶</span></button>`;
     const statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">${(group.items||[]).length} vendors</span>`;
     const lowestStr = m.lowest ? formatBasePrice(m.lowest._pb) : '<span class="text-gray-500">N/A</span>';
+    const primaryUrl = (m.lowest && m.lowest.url) || (group.items && group.items[0] && group.items[0].url) || null;
+    const nameLink = primaryUrl 
+        ? `<a href="/product/detail?group_key=${encodeURIComponent(group.group_key)}&url=${encodeURIComponent(primaryUrl)}" class="text-primary-300 font-medium hover:text-primary-200">${escapeHtml(String(groupName))}</a>`
+        : `<span class="text-primary-300 font-medium">${escapeHtml(String(groupName))}</span>`;
     return `
         <tr data-product-name="${escapeHtml(String(groupName)).toLowerCase()}" 
             data-status="enabled" data-alert="normal" data-price="${m.lowest ? m.lowest._pb : 0}" data-merchant="group" class="hover:bg-gray-700">
-            <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]">${toggleBtn}<span class="text-primary-300 font-medium">${escapeHtml(String(groupName))}</span></td>
+            <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]">${toggleBtn}${nameLink}</td>
             <td class="px-6 py-4 whitespace-normal break-all align-top"><span class="text-gray-400">Competitive Group</span></td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white align-top">${lowestStr}</td>
             <td class="px-6 py-4 whitespace-normal align-top text-sm"><div class="flex gap-2 flex-wrap">${statusBadge}</div></td>

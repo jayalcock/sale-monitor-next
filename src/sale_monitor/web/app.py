@@ -193,14 +193,60 @@ def create_app():
         """Get statistics for a product."""
         try:
             url = request.args.get('url')
-            if not url:
-                return jsonify({'error': 'URL parameter required'}), 400
+            group_key = request.args.get('group_key')
+            if not url and not group_key:
+                return jsonify({'error': 'URL or group_key parameter required'}), 400
 
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             days = int(request.args.get('days', 30))
 
-            stats = history.get_stats(url, days=days)
-            return jsonify(stats)
+            # Group stats: aggregate across all URLs in the group
+            if group_key:
+                # Build groups and find members
+                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                state = load_state(flask_app.config['STATE_FILE'])
+                base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
+                groups = _build_comparison_groups(state or {}, products or [], base_currency)
+                group = next((g for g in groups if g.get('group_key') == group_key), None)
+                if not group:
+                    return jsonify({'error': 'Group not found'}), 404
+                # Combine histories newest-first from DB
+                urls = [it['url'] for it in group.get('items', []) if it.get('url')]
+                records = []
+                for u in urls:
+                    recs = history.get_history_extended(u, days=days)
+                    for (ts, price, status, currency, _) in recs:
+                        if status == 'success':
+                            records.append((ts, price, currency))
+                if not records:
+                    return jsonify({'error': 'No data'}), 404
+                # Compute stats on base prices
+                ex_service = ExchangeRateService(cache_handler=history)
+                base_prices = []
+                for (ts, price, currency) in records:
+                    try:
+                        if currency.upper() == base_currency:
+                            base_prices.append(float(price))
+                        else:
+                            converted = ex_service.convert(float(price), currency.upper(), base_currency)
+                            if converted is not None:
+                                base_prices.append(float(converted))
+                    except Exception:
+                        pass
+                if not base_prices:
+                    return jsonify({'error': 'No data'}), 404
+                return jsonify({
+                    'current_price': base_prices[-1],
+                    'min_price': min(base_prices),
+                    'max_price': max(base_prices),
+                    'avg_price': sum(base_prices) / len(base_prices),
+                    'checks_count': len(base_prices),
+                    'first_check': None,
+                    'last_check': None,
+                })
+            else:
+                stats = history.get_stats(url, days=days)
+                return jsonify(stats)
         except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
 
@@ -213,18 +259,31 @@ def create_app():
         """
         try:
             url = request.args.get('url')
-            if not url:
-                return jsonify({'error': 'URL parameter required'}), 400
+            group_key = request.args.get('group_key')
+            if not url and not group_key:
+                return jsonify({'error': 'URL or group_key parameter required'}), 400
 
             days = int(request.args.get('days', 30))
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             ex_service = ExchangeRateService(cache_handler=history)
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
-
-            records = history.get_history_extended(url, days=days)
+            records = []
+            if group_key:
+                # Build groups and aggregate histories from members
+                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                state = load_state(flask_app.config['STATE_FILE'])
+                groups = _build_comparison_groups(state or {}, products or [], base_currency)
+                group = next((g for g in groups if g.get('group_key') == group_key), None)
+                if not group:
+                    return jsonify([])
+                urls = [it['url'] for it in group.get('items', []) if it.get('url')]
+                for u in urls:
+                    records.extend(history.get_history_extended(u, days=days))
+            else:
+                records = history.get_history_extended(url, days=days)
 
             # If no DB records, synthesize one from state so chart isn't blank
-            if not records:
+            if not records and url:
                 st = load_state(flask_app.config['STATE_FILE']).get(url)
                 if st and 'current_price' in st:
                     cur = st.get('current_price')
@@ -265,7 +324,25 @@ def create_app():
                     'base_currency': base_currency
                 })
 
-            return jsonify(result)
+            # If grouping: collapse by date (lowest base price per day)
+            if group_key and result:
+                from collections import defaultdict
+                day_map = defaultdict(list)
+                for r in result:
+                    d = r['timestamp'][:10]
+                    if r.get('price_in_base') is not None:
+                        day_map[d].append(r)
+                collapsed = []
+                for d, rs in day_map.items():
+                    # pick lowest base price entry
+                    rs.sort(key=lambda x: x.get('price_in_base') if x.get('price_in_base') is not None else float('inf'))
+                    r = rs[0]
+                    collapsed.append(r)
+                # Sort by timestamp ascending
+                collapsed.sort(key=lambda x: x['timestamp'])
+                return jsonify(collapsed)
+            else:
+                return jsonify(result)
         except (OSError, ValueError, sqlite3.Error) as e:
             return jsonify({'error': str(e)}), 500
     

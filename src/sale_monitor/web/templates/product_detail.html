@@ -48,6 +48,12 @@
                 <div id="stats-content" class="mt-2 text-gray-200 text-sm">
                     <!-- Populated by JS -->
                 </div>
+                <div id="group-badge" class="mt-3 hidden">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-700 text-primary-100">Grouped View</span>
+                </div>
+                <div id="group-members" class="mt-2 text-gray-300 text-sm hidden">
+                    <!-- Vendors list -->
+                </div>
             </div>
         </div>
     </div>
@@ -56,10 +62,19 @@
         <div class="p-4">
             <div class="flex items-center justify-between mb-3">
                 <h3 class="text-lg font-semibold text-white mb-0">Price History</h3>
-                <select id="currency-toggle" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md px-3 py-2 w-[220px]" title="Choose display currency">
+                <div class="flex items-center gap-2">
+                    <div id="group-mode" class="hidden">
+                        <label class="text-gray-300 text-sm mr-1">Mode:</label>
+                        <select id="group-mode-toggle" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md px-2 py-2">
+                            <option value="combined" selected>Combined</option>
+                            <option value="individual">Individual</option>
+                        </select>
+                    </div>
+                    <select id="currency-toggle" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md px-3 py-2 w-[220px]" title="Choose display currency">
                     <option value="base" selected>Currency: Base (CAD)</option>
                     <option value="native">Currency: Native</option>
-                </select>
+                    </select>
+                </div>
             </div>
             <div class="chart-responsive-wrapper mt-2">
                 <canvas id="price-chart"></canvas>
@@ -346,27 +361,57 @@ function loadProductInfo(url) {
         });
 }
 
-function loadStats(url) {
-    fetch(`/api/product/stats?url=${encodeURIComponent(url)}&days=30`)
+function loadStats(url, groupKey) {
+    const qs = groupKey 
+        ? `group_key=${encodeURIComponent(groupKey)}&days=30` 
+        : `url=${encodeURIComponent(url)}&days=30`;
+    fetch(`/api/product/stats?${qs}`)
         .then(response => {
             if (!response.ok) throw new Error('Failed to fetch stats');
             return response.json();
         })
         .then(stats => {
             // Handle empty stats object (no history for this product)
-            if (!stats || Object.keys(stats).length === 0 || !stats.total_checks) {
+            if (!stats || Object.keys(stats).length === 0 || (!stats.total_checks && !stats.checks_count)) {
                 document.getElementById('stats-content').innerHTML = '<p class="text-muted">No statistics available</p>';
                 return;
             }
-            const statsHtml = `
-                <p><strong>Checks:</strong> ${stats.total_checks}</p>
-                <p><strong>Lowest:</strong> ${formatPrice(stats.min_price)}</p>
-                <p><strong>Highest:</strong> ${formatPrice(stats.max_price)}</p>
-                <p><strong>Average:</strong> ${formatPrice(stats.avg_price)}</p>
-                <p><strong>First Check:</strong> ${formatDate(stats.first_check)}</p>
-                <p><strong>Latest Check:</strong> ${formatDate(stats.latest_check)}</p>
-            `;
-            document.getElementById('stats-content').innerHTML = statsHtml;
+            const checks = stats.total_checks || stats.checks_count || 0;
+            let latest = stats.latest_check || stats.last_check || stats.latest || null;
+            let first = stats.first_check || stats.first || null;
+            // For grouped view, if first/latest missing, derive from combined history
+            const maybeFixGroupedDates = () => {
+                return fetch(`/api/product/history?group_key=${encodeURIComponent(groupKey)}&days=30`)
+                    .then(r => r.ok ? r.json() : [])
+                    .then(history => {
+                        if (Array.isArray(history) && history.length) {
+                            // Sort by timestamp
+                            const valid = history.filter(h => parseUtcIso(h.timestamp));
+                            if (valid.length) {
+                                valid.sort((a,b)=> new Date(a.timestamp) - new Date(b.timestamp));
+                                first = valid[0].timestamp;
+                                latest = valid[valid.length-1].timestamp;
+                            }
+                        }
+                    })
+                    .catch(()=>{});
+            };
+            const renderStats = () => {
+                const statsHtml = `
+                    <p><strong>Checks:</strong> ${checks}</p>
+                    <p><strong>Lowest:</strong> ${formatPrice(stats.min_price)}</p>
+                    <p><strong>Highest:</strong> ${formatPrice(stats.max_price)}</p>
+                    <p><strong>Average:</strong> ${formatPrice(stats.avg_price)}</p>
+                    <p><strong>First Check:</strong> ${formatDate(first)}</p>
+                    <p><strong>Latest Check:</strong> ${formatDate(latest)}</p>
+                `;
+                document.getElementById('stats-content').innerHTML = statsHtml;
+            };
+            if (groupKey && (!first || !latest)) {
+                maybeFixGroupedDates().then(renderStats);
+            } else {
+                renderStats();
+            }
         })
         .catch(error => {
             console.error('Stats error:', error);
@@ -374,11 +419,13 @@ function loadStats(url) {
         });
 }
 
-function loadHistory(url) {
+function loadHistory(url, groupKey) {
     const days = 30;
     const currencyMode = document.getElementById('currency-toggle')?.value || 'base';
-    
-    fetch(`/api/product/history?url=${encodeURIComponent(url)}&days=${days}`)
+    const qs = groupKey 
+        ? `group_key=${encodeURIComponent(groupKey)}&days=${days}`
+        : `url=${encodeURIComponent(url)}&days=${days}`;
+    fetch(`/api/product/history?${qs}`)
         .then(response => {
             if (!response.ok) throw new Error('Failed to fetch history');
             return response.json();
@@ -571,6 +618,7 @@ function loadHistory(url) {
 
 function loadData() {
     const rawUrl = getUrlParameter('url');
+    const groupKey = getUrlParameter('group_key');
     if (!rawUrl) {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('error-message').textContent = 'No product URL specified';
@@ -591,13 +639,97 @@ function loadData() {
             } catch {}
             return Promise.all([
                 loadProductInfo(resolved),
-                loadStats(resolved),
-                loadHistory(resolved)
-            ]);
+                loadStats(resolved, groupKey)
+            ]).then(() => {
+                // Render chart based on current mode
+                const modeSel = document.getElementById('group-mode-toggle');
+                const mode = (groupKey && modeSel) ? modeSel.value : null;
+                if (groupKey && mode === 'individual') {
+                    // Individual series for group members
+                    const mk = getUrlParameter('group_key');
+                    if (mk) {
+                        // Use existing handler logic by calling the renderer
+                        fetch('/api/compare/groups')
+                            .then(r => r.ok ? r.json() : [])
+                            .then(groups => {
+                                const g = (groups || []).find(x => x.group_key === mk);
+                                if (!g || !Array.isArray(g.items) || !g.items.length) { loadHistory(resolved, mk); return; }
+                                const days = 30;
+                                const currencyMode = document.getElementById('currency-toggle')?.value || 'base';
+                                const items = g.items.slice();
+                                const promises = items.map(it => fetch(`/api/product/history?url=${encodeURIComponent(it.url)}&days=${days}`).then(r=> r.ok ? r.json() : []));
+                                Promise.all(promises).then(list => {
+                                    const allDatesSet = new Set();
+                                    const series = list.map((hist) => {
+                                        const dayMap = {};
+                                        hist.forEach(h => {
+                                            const d = parseUtcIso(h.timestamp);
+                                            if (!d) return;
+                                            const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                                            const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+                                            const v = (currencyMode === 'base') ? h.price_in_base : h.price;
+                                            if (v != null) {
+                                                if (!(key in dayMap) || Number(v) < dayMap[key]) {
+                                                    dayMap[key] = Number(v);
+                                                }
+                                                allDatesSet.add(key);
+                                            }
+                                        });
+                                        return { dayMap };
+                                    });
+                                    const allDates = Array.from(allDatesSet).sort();
+                                    if (chart) { chart.destroy(); chart = null; }
+                                    const ctx = document.getElementById('price-chart').getContext('2d');
+                                    const darkBgPlugin = { id: 'darkBackground', beforeDraw: (c)=>{ const x=c.ctx; x.save(); x.fillStyle='#1f2937'; x.fillRect(0,0,c.width,c.height); x.restore(); } };
+                                    const datasets = series.map((s, idx) => {
+                                        const color = `hsl(${(idx*57)%360}, 70%, 50%)`;
+                                        const data = allDates.map(d => (d in s.dayMap ? Number(s.dayMap[d]) : null));
+                                        const merchant = (function(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return `Vendor ${idx+1}`; } })(items[idx].url);
+                                        return { label: merchant, data, borderColor: color, backgroundColor: color.replace('50%','80%'), spanGaps: true, tension: 0.15, pointRadius: 0, pointHoverRadius: 6, pointHoverBorderWidth: 2, pointHoverBorderColor: '#fff' };
+                                    });
+                                    chart = new Chart(ctx, { type: 'line', data: { labels: allDates.map(d => new Date(d).toLocaleDateString()), datasets }, plugins: [darkBgPlugin], options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } }, interaction: { mode: 'nearest', intersect: false }, scales: { x: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', callback: v => `$${Number(v).toFixed(2)}` } } } } });
+                                });
+                            });
+                    } else {
+                        loadHistory(resolved, groupKey);
+                    }
+                } else {
+                    loadHistory(resolved, groupKey);
+                }
+            });
         })
         .then(() => {
             document.getElementById('loading').style.display = 'none';
             document.getElementById('product-detail').style.display = 'block';
+            // If group mode, show badges and members list
+            const groupModeWrap = document.getElementById('group-mode');
+            const groupBadge = document.getElementById('group-badge');
+            const membersEl = document.getElementById('group-members');
+            if (groupKey && groupModeWrap && groupBadge && membersEl) {
+                groupModeWrap.classList.remove('hidden');
+                groupBadge.classList.remove('hidden');
+                // Fetch members
+                fetch('/api/compare/groups')
+                    .then(r => r.ok ? r.json() : [])
+                    .then(groups => {
+                        const g = (groups || []).find(x => x.group_key === groupKey);
+                        if (g && Array.isArray(g.items) && g.items.length) {
+                            const html = g.items.map(it => {
+                                const merchant = (function(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return 'merchant'; } })(it.url);
+                                return `<div class="flex items-center justify-between py-1 border-b border-gray-700">
+                                    <div class="flex flex-col">
+                                        <a href="${it.url}" target="_blank" class="text-primary-300 hover:text-primary-200" style="text-decoration: underline;">${escapeHtml(String(it.name || 'Product'))}</a>
+                                        <span class="text-gray-400 text-xs">${merchant}</span>
+                                    </div>
+                                    <span class="text-gray-200 text-sm">${formatPrice(it.price_in_base != null ? it.price_in_base : it.current_price)}</span>
+                                </div>`;
+                            }).join('');
+                            membersEl.innerHTML = html;
+                            membersEl.classList.remove('hidden');
+                        }
+                    })
+                    .catch(()=>{});
+            }
         })
         .catch(error => {
             document.getElementById('loading').style.display = 'none';
@@ -614,12 +746,130 @@ refreshInterval = setInterval(loadData, 60000);
 
 // Currency toggle handler
 document.addEventListener('DOMContentLoaded', () => {
+    // Ensure grouped UI controls visible as soon as possible
+    const initialGroupKey = getUrlParameter('group_key');
+    if (initialGroupKey) {
+        const groupModeWrap = document.getElementById('group-mode');
+        const groupBadge = document.getElementById('group-badge');
+        const membersEl = document.getElementById('group-members');
+        if (groupModeWrap) groupModeWrap.classList.remove('hidden');
+        if (groupBadge) groupBadge.classList.remove('hidden');
+        if (membersEl) membersEl.classList.remove('hidden');
+    }
     const toggle = document.getElementById('currency-toggle');
     if (toggle) {
         toggle.addEventListener('change', () => {
             const url = RESOLVED_URL || getUrlParameter('url');
+            const groupKey = getUrlParameter('group_key');
+            const modeSel = document.getElementById('group-mode-toggle');
+            const mode = (groupKey && modeSel) ? modeSel.value : null;
             if (url) {
-                loadHistory(url);
+                if (groupKey && mode === 'individual') {
+                    // Re-render individual mode to apply currency change
+                    const event = new Event('change');
+                    modeSel.dispatchEvent(event);
+                } else {
+                    loadHistory(url, groupKey);
+                }
+            }
+        });
+    }
+    const groupModeToggle = document.getElementById('group-mode-toggle');
+    if (groupModeToggle) {
+        groupModeToggle.addEventListener('change', () => {
+            const mode = groupModeToggle.value;
+            const url = RESOLVED_URL || getUrlParameter('url');
+            const groupKey = getUrlParameter('group_key');
+            if (mode === 'combined') {
+                loadHistory(url, groupKey);
+            } else if (mode === 'individual' && groupKey) {
+                // Render individual series for group members
+                fetch('/api/compare/groups')
+                    .then(r => r.ok ? r.json() : [])
+                    .then(groups => {
+                        const g = (groups || []).find(x => x.group_key === groupKey);
+                        if (!g || !Array.isArray(g.items) || !g.items.length) return;
+                        const days = 30;
+                        const currencyMode = document.getElementById('currency-toggle')?.value || 'base';
+                        const items = g.items.slice();
+                        const promises = items.map(it => fetch(`/api/product/history?url=${encodeURIComponent(it.url)}&days=${days}`).then(r=> r.ok ? r.json() : []));
+                        Promise.all(promises).then(list => {
+                            // Build datasets per member
+                            const allDatesSet = new Set();
+                            const series = list.map((hist, idx) => {
+                                const dayMap = {};
+                                hist.forEach(h => {
+                                    const d = parseUtcIso(h.timestamp);
+                                    if (!d) return;
+                                    const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                                    const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+                                    const v = (currencyMode === 'base') ? h.price_in_base : h.price;
+                                    if (v != null) {
+                                        if (!(key in dayMap) || Number(v) < dayMap[key]) {
+                                            dayMap[key] = Number(v);
+                                        }
+                                        allDatesSet.add(key);
+                                    }
+                                });
+                                return { dayMap };
+                            });
+                            const allDates = Array.from(allDatesSet).sort();
+                            // Destroy existing chart
+                            if (chart) { chart.destroy(); chart = null; }
+                            const ctx = document.getElementById('price-chart').getContext('2d');
+                            const darkBgPlugin = { id: 'darkBackground', beforeDraw: (c)=>{ const x=c.ctx; x.save(); x.fillStyle='#1f2937'; x.fillRect(0,0,c.width,c.height); x.restore(); } };
+                            const datasets = series.map((s, idx) => {
+                                const color = `hsl(${(idx*57)%360}, 70%, 50%)`;
+                                const data = allDates.map(d => (d in s.dayMap ? Number(s.dayMap[d]) : null));
+                                // Label with merchant hostname
+                                const merchant = (function(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return `Vendor ${idx+1}`; } })(items[idx].url);
+                                return {
+                                    label: merchant,
+                                    data,
+                                    borderColor: color,
+                                    backgroundColor: color.replace('50%','80%'),
+                                    spanGaps: true,
+                                    tension: 0.15,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 6,
+                                    pointHoverBorderWidth: 2,
+                                    pointHoverBorderColor: '#fff'
+                                };
+                            });
+                            chart = new Chart(ctx, {
+                                type: 'line',
+                                data: { labels: allDates.map(d => new Date(d).toLocaleDateString()), datasets },
+                                plugins: [darkBgPlugin],
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } },
+                                    interaction: { mode: 'nearest', intersect: false },
+                                    scales: { x: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', callback: v => `$${Number(v).toFixed(2)}` } } }
+                                }
+                            });
+
+                            // Update group members list with color chips
+                            const membersEl = document.getElementById('group-members');
+                            if (membersEl) {
+                                const html = items.map((it, idx) => {
+                                    const merchant = (function(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return 'merchant'; } })(it.url);
+                                    const color = `hsl(${(idx*57)%360}, 70%, 50%)`;
+                                    return `<div class="flex items-center justify-between py-1 border-b border-gray-700">
+                                        <div class="flex items-center gap-2">
+                                            <span class="inline-block w-3 h-3 rounded" style="background:${color}"></span>
+                                            <div class="flex flex-col">
+                                                <a href="${it.url}" target="_blank" class="text-primary-300 hover:text-primary-200" style="text-decoration: underline;">${escapeHtml(String(it.name || 'Product'))}</a>
+                                                <span class="text-gray-400 text-xs">${merchant}</span>
+                                            </div>
+                                        </div>
+                                        <span class="text-gray-200 text-sm">${formatPrice(it.price_in_base != null ? it.price_in_base : it.current_price)}</span>
+                                    </div>`;
+                                }).join('');
+                                membersEl.innerHTML = html;
+                            }
+                        });
+                    });
             }
         });
     }
