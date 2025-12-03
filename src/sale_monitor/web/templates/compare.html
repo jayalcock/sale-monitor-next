@@ -54,7 +54,7 @@
       const items = g.items.map((it, idx) => {
         const isLowest = idx === 0 && it.price_in_base !== null && it.price_in_base !== undefined;
         return `
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 ${isLowest ? 'bg-gray-700' : 'bg-gray-800'}">\n          <div class="flex-1">\n            <a class="text-primary-300 hover:text-primary-200 font-medium" href="${it.url}" target="_blank" rel="noopener">${it.name}</a>\n            <div class="text-xs text-gray-300 mt-1">${it.currency} ${fmtPrice(it.current_price)} <span class="text-gray-500">|</span> Base: ${fmtPrice(it.price_in_base)}</div>\n          </div>\n          <button class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-600" onclick="retry('${it.url}')">Retry</button>\n        </div>`;
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 ${isLowest ? 'bg-gray-700' : 'bg-gray-800'}">\n          <div class="flex-1">\n            <a class="text-primary-300 hover:text-primary-200 font-medium" href="${it.url}" target="_blank" rel="noopener">${it.name}</a>\n            <div class="text-xs text-gray-300 mt-1">${it.currency} ${fmtPrice(it.current_price)} <span class="text-gray-500">|</span> Base: ${fmtPrice(it.price_in_base)}</div>\n          </div>\n        </div>`;
       }).join('');
 
       const id = g.identifiers || {};
@@ -78,16 +78,6 @@
     const el = document.getElementById('g_' + key);
     if (!el) return;
     el.classList.toggle('hidden');
-  }
-
-  async function retry(url) {
-    try {
-      const res = await fetch('/api/product/check', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url})
-      });
-      if (!res.ok) throw new Error(await res.text());
-      await fetchGroups();
-    } catch (e) { alert('Retry failed: ' + e); }
   }
 
   function showError(msg) {

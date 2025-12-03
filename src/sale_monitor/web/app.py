@@ -432,15 +432,22 @@ def create_app():
 
             # Update state
             state = load_state(flask_app.config['STATE_FILE'])
+            existing_state = state.get(url, {})
+            new_identifiers = getattr(extractor, 'last_identifiers', {}) or {}
+            # Preserve existing identifiers and group_key if new extraction didn't find any
+            preserved_identifiers = existing_state.get('identifiers', {})
+            merged_identifiers = {**preserved_identifiers, **new_identifiers} if new_identifiers else preserved_identifiers
+            
             state[url] = {
                 'current_price': price,
                 'last_checked': datetime.now(timezone.utc).isoformat(),
-                'last_price': state.get(url, {}).get('current_price', price),
+                'last_price': existing_state.get('current_price', price),
                 'selector_source': selector_source,
                 'currency': currency,
                 'currency_source': currency_source,
                 'price_in_base': price_in_base,
-                'identifiers': getattr(extractor, 'last_identifiers', {}) or state.get(url, {}).get('identifiers')
+                'identifiers': merged_identifiers,
+                'group_key': existing_state.get('group_key')  # Preserve manual group_key
             }
             save_state(flask_app.config['STATE_FILE'], state)
             

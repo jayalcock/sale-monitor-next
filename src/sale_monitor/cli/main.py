@@ -63,6 +63,12 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
         rec = state.get(key, {})
         old_price = rec.get("current_price")
 
+        # Extract identifiers from current scrape
+        new_identifiers = getattr(extractor, 'last_identifiers', {}) or {}
+        # Preserve existing identifiers and group_key, merge with new ones
+        preserved_identifiers = rec.get('identifiers', {})
+        merged_identifiers = {**preserved_identifiers, **new_identifiers} if new_identifiers else preserved_identifiers
+
         # Persist price check
         rec.update({
             "name": p.name,
@@ -74,6 +80,8 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
             "last_price": old_price,
             "currency": currency,
             "currency_source": currency_source,
+            "identifiers": merged_identifiers,
+            "group_key": rec.get("group_key"),  # Preserve manual group_key
         })
 
         # Log price change
