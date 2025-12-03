@@ -1123,7 +1123,7 @@ function renderCompetitiveGroups(groups) {
 function loadGroups() {
     const errEl = document.getElementById('groups-error');
     if (errEl) errEl.style.display = 'none';
-    fetch('/api/compare/groups')
+    return fetch('/api/compare/groups')
         .then(r => {
             if (!r.ok) throw new Error('Failed to fetch groups');
             return r.json();
@@ -1135,6 +1135,10 @@ function loadGroups() {
             const section = document.getElementById('groups-section');
             if (section) section.style.display = 'none';
             if (errEl) errEl.style.display = 'block';
+            // Initialize empty lookups on error so products can still render
+            GROUPS = [];
+            URL_TO_GROUP = {};
+            GROUP_PRIMARY_URL = {};
         });
 }
 
@@ -1193,8 +1197,8 @@ function renderGroupChildRow(it) {
             <td class="px-4 py-2 text-white">${priceHtml}</td>
             <td class="px-4 py-2 text-right">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
-                    <a href="${historyUrl}" class="inline-flex items-center px-3 py-1 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700">📈 History</a>
-                    <button class="inline-flex items-center px-3 py-1 border border-primary-600 border-l-0 text-sm font-medium text-primary-400 bg-gray-900 hover:bg-gray-700" onclick="checkPrice('${it.url}', this)">🔄 Check</button>
+                    <button class="inline-flex items-center px-3 py-1 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700" onclick="checkPrice('${it.url}', this)">🔄 Check</button>
+                    <button class="inline-flex items-center px-3 py-1 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700" onclick="deleteProduct('${it.url}', '${(it.name || 'Product').replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
             </td>
         </tr>
@@ -1254,13 +1258,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Initial load
-loadProducts();
-loadTrends();
-loadGroups();
+// Initial load - sequence to ensure groups ready before products render
+loadGroups().then(() => {
+    loadProducts();
+    loadTrends();
+});
 
-// Auto-refresh every 60 seconds
-refreshInterval = setInterval(() => { loadProducts(); loadTrends(); loadGroups(); }, 60000);
+// Auto-refresh every 60 seconds - same sequence
+refreshInterval = setInterval(() => {
+    loadGroups().then(() => {
+        loadProducts();
+        loadTrends();
+    });
+}, 60000);
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
