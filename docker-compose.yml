@@ -31,6 +31,9 @@ services:
       - USER_AGENT=${USER_AGENT:-Mozilla/5.0 (compatible; SaleMonitor/1.0)}
       - TIMEOUT=${TIMEOUT:-30}
       - MAX_RETRIES=${MAX_RETRIES:-3}
+      # Product Discovery (disabled by default - can be slow)
+      - ENABLE_AUTO_DISCOVERY=${ENABLE_AUTO_DISCOVERY:-0}
+      - DISCOVERY_INTERVAL_HOURS=${DISCOVERY_INTERVAL_HOURS:-24}
     ports:
       - "5050:5000"
     volumes:
