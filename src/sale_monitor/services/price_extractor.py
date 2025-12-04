@@ -368,10 +368,15 @@ class PriceExtractor:
                 continue
             self._collect_prices_from_json(data, prices)
             if prices:
-                # Use the highest price to get regular retail price (not discounted/subscription prices)
+                # Filter to positive prices
                 positives = [p for p in prices if isinstance(p, (int, float)) and p > 0]
                 if positives:
-                    return float(max(positives))
+                    # Use the most frequently occurring price (usually the main product price)
+                    # If all unique, use the first one (primary listing)
+                    from collections import Counter
+                    price_counts = Counter(positives)
+                    most_common_price = price_counts.most_common(1)[0][0]
+                    return float(most_common_price)
         return None
 
     def _collect_prices_from_json(self, obj, out_list):
