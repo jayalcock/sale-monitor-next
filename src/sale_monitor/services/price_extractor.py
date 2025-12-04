@@ -368,10 +368,10 @@ class PriceExtractor:
                 continue
             self._collect_prices_from_json(data, prices)
             if prices:
-                # Prefer the smallest positive plausible price to avoid capturing strikethrough lists
+                # Use the highest price to get regular retail price (not discounted/subscription prices)
                 positives = [p for p in prices if isinstance(p, (int, float)) and p > 0]
                 if positives:
-                    return float(min(positives))
+                    return float(max(positives))
         return None
 
     def _collect_prices_from_json(self, obj, out_list):
