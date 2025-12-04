@@ -55,14 +55,16 @@ class PriceHistory:
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     try:
-                        # Try checkpointing WAL and re-checking integrity
-                        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        # Try passive checkpoint first (doesn't block writers)
+                        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     except sqlite3.Error:
                         pass
             except sqlite3.Error:
                 pass
             # Re-check after checkpoint attempt
             if not self._integrity_ok():
+                # Only quarantine if database still fails after checkpoint
+                # This avoids losing data during container restarts with WAL files
                 self._quarantine_db_files()
 
         with sqlite3.connect(self.db_path) as conn:
