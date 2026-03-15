@@ -2,22 +2,22 @@ import argparse
 from typing import Dict
 
 from sale_monitor.storage.price_history import PriceHistory
-from sale_monitor.storage.csv_products import read_products
+from sale_monitor.storage.product_store import ProductStore
 
 
-def build_name_map(products_csv: str) -> Dict[str, str]:
-    products = read_products(products_csv)
+def build_name_map(history_db: str) -> Dict[str, str]:
+    store = ProductStore(history_db)
+    products = store.get_all()
     return {p.url: p.name for p in products}
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Normalize product names in history DB from products.csv")
-    parser.add_argument("--products-csv", default="data/products.csv", help="Path to products.csv")
+    parser = argparse.ArgumentParser(description="Normalize product names in history DB from products table")
     parser.add_argument("--history-db", default="data/history.db", help="Path to SQLite history DB")
     parser.add_argument("--apply", action="store_true", help="Apply changes (otherwise dry-run)")
     args = parser.parse_args()
 
-    name_map = build_name_map(args.products_csv)
+    name_map = build_name_map(args.history_db)
     ph = PriceHistory(args.history_db)
 
     if not args.apply:

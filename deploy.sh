@@ -45,8 +45,8 @@ rsync -avz \
 
 echo "✅ Files synced"
 
-echo "🔄 Restarting container..."
-ssh "$SERVER" "docker compose -f '$REMOTE_APP_DIR/docker-compose.yml' restart"
+echo "🔄 Rebuilding and restarting container..."
+ssh "$SERVER" "docker compose -f '$REMOTE_APP_DIR/docker-compose.yml' up --build -d"
 
 echo "✅ Deployment complete!"
 echo ""

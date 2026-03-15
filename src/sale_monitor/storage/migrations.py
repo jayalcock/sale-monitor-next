@@ -26,9 +26,37 @@ def _migration_2_add_status_index(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_3_create_products_table(conn: sqlite3.Connection) -> None:
+    """Create products table — source of truth for product definitions."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL UNIQUE,
+            target_price REAL,
+            discount_threshold REAL,
+            selector TEXT DEFAULT '',
+            enabled INTEGER DEFAULT 1,
+            notification_cooldown_hours INTEGER DEFAULT 24,
+            selector_source TEXT,
+            currency TEXT DEFAULT 'CAD',
+            "group" TEXT,
+            tags TEXT DEFAULT '',
+            alert_rules TEXT DEFAULT '',
+            notification_channels TEXT DEFAULT '',
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_url ON products(url)"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     (1, "composite index on product_url+timestamp", _migration_1_add_last_checked_index),
     (2, "index on check_status", _migration_2_add_status_index),
+    (3, "create products table", _migration_3_create_products_table),
 ]
 
 

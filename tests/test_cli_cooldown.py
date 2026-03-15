@@ -16,6 +16,7 @@ def temp_env(tmp_path, monkeypatch):
     """Set up temporary CSV, state, and env vars for CLI testing."""
     csv_file = tmp_path / "products.csv"
     state_file = tmp_path / "state.json"
+    history_db = tmp_path / "history.db"
     
     # Minimal env for CLI
     monkeypatch.setenv("ENABLE_EMAIL_NOTIFICATIONS", "true")
@@ -29,6 +30,7 @@ def temp_env(tmp_path, monkeypatch):
     return {
         "csv_file": str(csv_file),
         "state_file": str(state_file),
+        "history_db": str(history_db),
         "tmp_path": tmp_path,
     }
 
@@ -58,7 +60,7 @@ def test_first_notification_sent(temp_env, mocker):
     mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
     mock_history.return_value.cleanup_old_records.return_value = 0
     
-    with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+    with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
         # Act
         result = main()
     
@@ -92,7 +94,7 @@ def test_cooldown_suppression_same_price(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     assert mock_send.call_count == 1
@@ -102,7 +104,7 @@ def test_cooldown_suppression_same_price(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             result = main()
     
     # Assert - no notification sent
@@ -132,7 +134,7 @@ def test_cooldown_expiry_sends_notification(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     assert mock_send.call_count == 1
@@ -142,7 +144,7 @@ def test_cooldown_expiry_sends_notification(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=25)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             result = main()
     
     # Assert - notification sent again
@@ -171,7 +173,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     assert mock_send.call_count == 1
@@ -182,7 +184,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             result = main()
     
     # Assert - notification sent because price changed
@@ -214,7 +216,7 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     assert mock_send.call_count == 1
@@ -224,7 +226,7 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(minutes=30)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     mock_send.assert_not_called()
@@ -234,7 +236,7 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(minutes=65)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             result = main()
     
     # Assert - notification sent after 1h cooldown expires
@@ -266,7 +268,7 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             main()
     
     assert mock_send.call_count == 2
@@ -277,7 +279,7 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
-        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"]]):
+        with patch("sys.argv", ["cli", "--products-csv", temp_env["csv_file"], "--state-file", temp_env["state_file"], "--history-db", temp_env["history_db"]]):
             result = main()
     
     # Assert - only Product A notifies (price changed)

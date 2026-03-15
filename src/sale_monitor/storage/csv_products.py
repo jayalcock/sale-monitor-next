@@ -4,6 +4,12 @@ from typing import List, Optional  # noqa: F811 (List used by _parse_list)
 
 from sale_monitor.domain.models import Product
 
+CSV_COLUMNS = [
+    'name', 'url', 'target_price', 'discount_threshold', 'selector',
+    'enabled', 'notification_cooldown_hours', 'selector_source', 'currency',
+    'group', 'tags', 'alert_rules', 'notification_channels',
+]
+
 
 def _parse_float(value: Optional[str]) -> Optional[float]:
     if value is None:
@@ -70,3 +76,28 @@ def read_products(csv_path: str) -> List[Product]:
             )
             products.append(product)
     return products
+
+
+def export_products_csv(filepath: str, products: List[Product]) -> None:
+    """Write products to a CSV file (export format)."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(CSV_COLUMNS)
+        for p in products:
+            writer.writerow([
+                p.name,
+                p.url,
+                p.target_price if p.target_price is not None else '',
+                p.discount_threshold if p.discount_threshold is not None else '',
+                p.selector,
+                'true' if p.enabled else 'false',
+                p.notification_cooldown_hours,
+                p.selector_source if p.selector_source else '',
+                p.currency if hasattr(p, 'currency') else 'CAD',
+                p.group if getattr(p, 'group', None) else '',
+                ','.join(getattr(p, 'tags', []) or []),
+                ','.join(getattr(p, 'alert_rules', []) or []),
+                ','.join(getattr(p, 'notification_channels', []) or []),
+            ])

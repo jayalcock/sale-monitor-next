@@ -12,9 +12,9 @@ import schedule
 from dotenv import load_dotenv
 
 from sale_monitor.services.price_extractor import PriceExtractor
-from sale_monitor.storage.csv_products import read_products
 from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
+from sale_monitor.storage.product_store import ProductStore
 from sale_monitor.services.notifications import NotificationManager, SmtpConfig
 
 
@@ -24,15 +24,17 @@ def _str_to_bool(v: str, default: bool = False) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def check_prices(args, smtp_cfg, notifier, extractor, history=None):
+def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
     """Check prices for all products - extracted for scheduling."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    products = read_products(args.products_csv)
+    if store is None:
+        store = ProductStore(args.history_db)
+    products = store.get_all()
     state = load_state(args.state_file)
 
     enabled = [p for p in products if p.enabled]
-    logging.info(f"Checking {len(enabled)} enabled products from {args.products_csv}")
+    logging.info(f"Checking {len(enabled)} enabled products")
 
     # Phase 1: Extract prices in parallel (I/O bound)
     max_workers = min(4, len(enabled)) if enabled else 1
@@ -231,8 +233,9 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
 def main() -> int:
     load_dotenv(override=False)
 
-    parser = argparse.ArgumentParser(description="Sale Monitor - CSV-backed")
-    parser.add_argument("--products-csv", default=os.getenv("PRODUCTS_CSV", "data/products.csv"))
+    parser = argparse.ArgumentParser(description="Sale Monitor")
+    parser.add_argument("--products-csv", default=os.getenv("PRODUCTS_CSV", "data/products.csv"),
+                       help="CSV file for initial import (one-time migration to DB)")
     parser.add_argument("--state-file", default=os.getenv("STATE_FILE", "data/state.json"))
     parser.add_argument("--history-db", default=os.getenv("HISTORY_DB", "data/history.db"))
     parser.add_argument("--history-retention-days", type=int, default=int(os.getenv("HISTORY_RETENTION_DAYS", "90")))
@@ -261,9 +264,18 @@ def main() -> int:
     from sale_monitor.logging_config import setup_logging
     setup_logging(level=args.log_level)
 
-    # Initialize history
+    # Initialize history and product store
     history = PriceHistory(args.history_db)
-    
+    store = ProductStore(args.history_db)
+
+    # Auto-import from CSV on first run (one-time migration)
+    import pathlib
+    csv_path = args.products_csv
+    if pathlib.Path(csv_path).exists():
+        imported = store.auto_import_csv(csv_path)
+        if imported:
+            logging.info(f"Imported {imported} products from {csv_path} into database")
+
     # Handle query commands
     if args.list_products:
         products = history.get_all_products()
@@ -278,11 +290,11 @@ def main() -> int:
     
     if args.show_history:
         product_name = args.show_history
-        products = read_products(args.products_csv)
+        products = store.get_all()
         product = next((p for p in products if p.name.lower() == product_name.lower()), None)
         
         if not product:
-            print(f"Product '{product_name}' not found in {args.products_csv}")
+            print(f"Product '{product_name}' not found")
             return 1
         
         hist = history.get_history(product.url, days=args.days, limit=100)
@@ -301,11 +313,11 @@ def main() -> int:
     
     if args.show_stats:
         product_name = args.show_stats
-        products = read_products(args.products_csv)
+        products = store.get_all()
         product = next((p for p in products if p.name.lower() == product_name.lower()), None)
         
         if not product:
-            print(f"Product '{product_name}' not found in {args.products_csv}")
+            print(f"Product '{product_name}' not found")
             return 1
         
         stats = history.get_stats(product.url, days=args.days)
@@ -350,9 +362,8 @@ def main() -> int:
         if deleted:
             logging.info(f"Cleaned up {deleted} old history records (retention: {args.history_retention_days} days)")
 
-    # Prune stale state entries (URLs no longer in products CSV)
-    products_for_prune = read_products(args.products_csv)
-    active_urls = {p.url for p in products_for_prune}
+    # Prune stale state entries (URLs no longer in products)
+    active_urls = store.urls()
     pruned = prune_stale_entries(args.state_file, active_urls)
     if pruned:
         logging.info(f"Pruned {pruned} stale state entries")
@@ -360,29 +371,29 @@ def main() -> int:
     # One-time run or scheduled?
     if not args.every:
         # One-time check
-        check_prices(args, smtp_cfg, notifier, extractor, history)
+        check_prices(args, smtp_cfg, notifier, extractor, history, store)
         return 0
 
     # Parse interval
     interval = args.every.strip().lower()
     if interval.endswith('m'):
         minutes = int(interval[:-1])
-        schedule.every(minutes).minutes.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history))
+        schedule.every(minutes).minutes.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
         logging.info(f"Scheduler started: checking every {minutes} minute(s)")
     elif interval.endswith('h'):
         hours = int(interval[:-1])
-        schedule.every(hours).hours.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history))
+        schedule.every(hours).hours.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
         logging.info(f"Scheduler started: checking every {hours} hour(s)")
     elif interval.endswith('s'):
         seconds = int(interval[:-1])
-        schedule.every(seconds).seconds.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history))
+        schedule.every(seconds).seconds.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
         logging.info(f"Scheduler started: checking every {seconds} second(s)")
     else:
         logging.error(f"Invalid interval format: {interval}. Use format like '15m', '1h', '30s'")
         return 1
 
     # Run once immediately, then on schedule
-    check_prices(args, smtp_cfg, notifier, extractor, history)
+    check_prices(args, smtp_cfg, notifier, extractor, history, store)
 
     try:
         while True:

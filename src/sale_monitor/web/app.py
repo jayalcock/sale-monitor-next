@@ -12,9 +12,10 @@ import requests
 import logging
 from urllib.parse import urlparse
 
-from sale_monitor.storage.csv_products import read_products
+from sale_monitor.storage.csv_products import export_products_csv
 from sale_monitor.storage.json_state import load_state, save_state
 from sale_monitor.storage.price_history import PriceHistory
+from sale_monitor.storage.product_store import ProductStore
 from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.domain.models import Product
@@ -33,6 +34,17 @@ def create_app():
     flask_app.config['PRODUCTS_CSV'] = os.getenv('PRODUCTS_CSV', 'data/products.csv')
     flask_app.config['STATE_FILE'] = os.getenv('STATE_FILE', 'data/state.json')
     flask_app.config['HISTORY_DB'] = os.getenv('HISTORY_DB', 'data/history.db')
+
+    # Initialize product store (SQLite-backed)
+    product_store = ProductStore(flask_app.config['HISTORY_DB'])
+    flask_app.config['PRODUCT_STORE'] = product_store
+
+    # Auto-import from CSV on first run (one-time migration)
+    csv_path = flask_app.config['PRODUCTS_CSV']
+    if os.path.exists(csv_path):
+        imported = product_store.auto_import_csv(csv_path)
+        if imported:
+            logger.info("Imported %d products from %s into database", imported, csv_path)
     flask_app.config['USER_AGENT'] = os.getenv('USER_AGENT', 'Mozilla/5.0 (compatible; SaleMonitor/1.0)')
     flask_app.config['TIMEOUT'] = int(os.getenv('TIMEOUT', '30'))
     flask_app.config['MAX_RETRIES'] = int(os.getenv('MAX_RETRIES', '3'))
@@ -224,7 +236,8 @@ def create_app():
     def api_products():
         """Get all products with current state."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             state = load_state(flask_app.config['STATE_FILE'])
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
 
@@ -293,7 +306,8 @@ def create_app():
             # Group stats: aggregate across all URLs in the group
             if group_key:
                 # Build groups and find members
-                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                product_store = flask_app.config['PRODUCT_STORE']
+                products = product_store.get_all()
                 state = load_state(flask_app.config['STATE_FILE'])
                 base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
@@ -361,7 +375,8 @@ def create_app():
             records = []
             if group_key:
                 # Build groups and aggregate histories from members
-                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                product_store = flask_app.config['PRODUCT_STORE']
+                products = product_store.get_all()
                 state = load_state(flask_app.config['STATE_FILE'])
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
                 group = next((g for g in groups if g.get('group_key') == group_key), None)
@@ -447,26 +462,15 @@ def create_app():
             if not url:
                 return jsonify({'error': 'URL required'}), 400
             
-            # Read all products
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            
-            # Find and toggle the product
-            found = False
-            updated_products = []
-            updated_products = []
-            for p in products:
-                if p.url == url:
-                    p.enabled = not p.enabled
-                    found = True
-                updated_products.append(p)
-            
-            if not found:
+            product_store = flask_app.config['PRODUCT_STORE']
+            product = product_store.get_by_url(url)
+            if not product:
                 return jsonify({'error': 'Product not found'}), 404
             
-            # Write back to CSV
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], updated_products)
+            new_enabled = not product.enabled
+            product_store.update(url, enabled=new_enabled)
             
-            return jsonify({'success': True, 'enabled': [p for p in updated_products if p.url == url][0].enabled})
+            return jsonify({'success': True, 'enabled': new_enabled})
         except (OSError, ValueError) as e:
             return _safe_error(e)
     
@@ -481,8 +485,8 @@ def create_app():
                 return jsonify({'error': 'URL required'}), 400
             
             # Find product
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            product = next((p for p in products if p.url == url), None)
+            product_store = flask_app.config['PRODUCT_STORE']
+            product = product_store.get_by_url(url)
             
             if not product:
                 return jsonify({'error': 'Product not found'}), 404
@@ -570,8 +574,8 @@ def create_app():
         Returns summary of successes / failures.
         """
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            enabled = [p for p in products if p.enabled]
+            product_store = flask_app.config['PRODUCT_STORE']
+            enabled = product_store.get_enabled()
             if not enabled:
                 return jsonify({'success': True, 'updated': 0, 'failed': 0, 'message': 'No enabled products'}), 200
 
@@ -683,15 +687,9 @@ def create_app():
             if not url:
                 return jsonify({'error': 'URL required'}), 400
             
-            # Read and filter products
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            filtered = [p for p in products if p.url != url]
-            
-            if len(filtered) == len(products):
+            product_store = flask_app.config['PRODUCT_STORE']
+            if not product_store.delete(url):
                 return jsonify({'error': 'Product not found'}), 404
-            
-            # Write back
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], filtered)
             
             return jsonify({'success': True})
         except (OSError, ValueError) as e:
@@ -703,7 +701,8 @@ def create_app():
     def api_auto_detect_all():
         """Attempt to auto-detect price selectors for all products."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             
             extractor = PriceExtractor(
                 user_agent=flask_app.config['USER_AGENT'],
@@ -713,7 +712,6 @@ def create_app():
             
             successful = 0
             failed = 0
-            updated_products = []
             
             for product in products:
                 try:
@@ -722,21 +720,13 @@ def create_app():
                     
                     if price is not None and selector_source == 'auto':
                         # Auto-detection succeeded - clear selector and mark as auto
-                        product.selector = ''
-                        product.selector_source = 'auto'
+                        product_store.update(product.url, selector='', selector_source='auto')
                         successful += 1
                     else:
-                        # Keep existing product unchanged
                         failed += 1
-                    
-                    updated_products.append(product)
                 except (OSError, ValueError, sqlite3.Error, requests.exceptions.RequestException) as e:
                     logging.error("Auto-detect failed for %s: %s", product.url, e)
-                    updated_products.append(product)  # Keep original
                     failed += 1
-            
-            # Write updated products back to CSV
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], updated_products)
             
             return jsonify({
                 'success': True,
@@ -824,16 +814,12 @@ def create_app():
                 notification_channels=_parse_csv_list(data.get('notification_channels')),
             )
             
-            # Read existing products
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            
-            # Check for duplicate URL
-            if any(p.url == new_product.url for p in products):
+            # Check for duplicate URL and add
+            product_store = flask_app.config['PRODUCT_STORE']
+            if product_store.get_by_url(new_product.url):
                 return jsonify({'error': 'Product with this URL already exists'}), 400
             
-            # Add and save
-            products.append(new_product)
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
+            product_store.add(new_product)
             
             # Auto-check price for newly added product
             try:
@@ -919,69 +905,60 @@ def create_app():
             if not url:
                 return jsonify({'error': 'URL required'}), 400
             
-            # Read products
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            
-            # Find and update
-            found = False
-            for i, p in enumerate(products):
-                if p.url == url:
-                    # Safe parsing helpers with validation
-                    def _parse_float(val, current, field_name):
-                        if val in (None, ''):
-                            return current
-                        try:
-                            return float(val)
-                        except (TypeError, ValueError) as exc:
-                            raise ValueError(f'{field_name} must be a valid number') from exc
-
-                    def _parse_int(val, current, field_name):
-                        if val in (None, ''):
-                            return current
-                        try:
-                            parsed = int(val)
-                        except (TypeError, ValueError) as exc:
-                            raise ValueError(f'{field_name} must be a valid positive integer') from exc
-                        if parsed < 0:
-                            raise ValueError(f'{field_name} must be a positive number')
-                        return parsed
-
-                    try:
-                        target_price = _parse_float(data.get('target_price'), p.target_price, 'target_price')
-                        discount_threshold = _parse_float(data.get('discount_threshold'), p.discount_threshold, 'discount_threshold')
-                        cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours, 'notification_cooldown_hours')
-                    except ValueError as ve:
-                        return jsonify({'error': str(ve)}), 400
-
-                    def _parse_csv_list(val, current):
-                        if val is None:
-                            return current
-                        if isinstance(val, list):
-                            return [s.strip() for s in val if isinstance(s, str) and s.strip()]
-                        return [s.strip() for s in str(val).split(',') if s.strip()]
-
-                    products[i] = Product(
-                        name=data.get('name', p.name),
-                        url=url,
-                        target_price=target_price,
-                        discount_threshold=discount_threshold,
-                        selector=data.get('selector', p.selector),
-                        enabled=data.get('enabled', p.enabled),
-                        notification_cooldown_hours=cooldown_hours,
-                        group=data.get('group', p.group).strip() if data.get('group') is not None else p.group,
-                        tags=_parse_csv_list(data.get('tags'), getattr(p, 'tags', [])),
-                        alert_rules=_parse_csv_list(data.get('alert_rules'), getattr(p, 'alert_rules', [])),
-                        notification_channels=_parse_csv_list(data.get('notification_channels'), getattr(p, 'notification_channels', [])),
-                    )
-                    found = True
-                    break
-            
-            if not found:
+            product_store = flask_app.config['PRODUCT_STORE']
+            p = product_store.get_by_url(url)
+            if not p:
                 return jsonify({'error': 'Product not found'}), 404
-            
-            _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
-            
-            updated = next((pp for pp in products if pp.url == url), None)
+
+            # Safe parsing helpers with validation
+            def _parse_float(val, current, field_name):
+                if val in (None, ''):
+                    return current
+                try:
+                    return float(val)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'{field_name} must be a valid number') from exc
+
+            def _parse_int(val, current, field_name):
+                if val in (None, ''):
+                    return current
+                try:
+                    parsed = int(val)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'{field_name} must be a valid positive integer') from exc
+                if parsed < 0:
+                    raise ValueError(f'{field_name} must be a positive number')
+                return parsed
+
+            try:
+                target_price = _parse_float(data.get('target_price'), p.target_price, 'target_price')
+                discount_threshold = _parse_float(data.get('discount_threshold'), p.discount_threshold, 'discount_threshold')
+                cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours, 'notification_cooldown_hours')
+            except ValueError as ve:
+                return jsonify({'error': str(ve)}), 400
+
+            def _parse_csv_list(val, current):
+                if val is None:
+                    return current
+                if isinstance(val, list):
+                    return [s.strip() for s in val if isinstance(s, str) and s.strip()]
+                return [s.strip() for s in str(val).split(',') if s.strip()]
+
+            fields = {
+                'name': data.get('name', p.name),
+                'target_price': target_price,
+                'discount_threshold': discount_threshold,
+                'selector': data.get('selector', p.selector),
+                'enabled': data.get('enabled', p.enabled),
+                'notification_cooldown_hours': cooldown_hours,
+                'group': data.get('group', p.group).strip() if data.get('group') is not None else p.group,
+                'tags': _parse_csv_list(data.get('tags'), getattr(p, 'tags', [])),
+                'alert_rules': _parse_csv_list(data.get('alert_rules'), getattr(p, 'alert_rules', [])),
+                'notification_channels': _parse_csv_list(data.get('notification_channels'), getattr(p, 'notification_channels', [])),
+            }
+            product_store.update(url, **fields)
+
+            updated = product_store.get_by_url(url)
             return jsonify({'success': True, 'product': {
                 'name': updated.name,
                 'url': updated.url,
@@ -1007,8 +984,8 @@ def create_app():
             if len(items) > 100:
                 return jsonify({'error': 'Maximum 100 products per import'}), 400
 
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            existing_urls = {p.url for p in products}
+            product_store = flask_app.config['PRODUCT_STORE']
+            existing_urls = product_store.urls()
 
             def _parse_csv_list(val):
                 if not val:
@@ -1063,12 +1040,9 @@ def create_app():
                     alert_rules=_parse_csv_list(item.get('alert_rules')),
                     notification_channels=_parse_csv_list(item.get('notification_channels')),
                 )
-                products.append(new_product)
+                product_store.add(new_product)
                 existing_urls.add(url)
                 added.append(name)
-
-            if added:
-                _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
 
             return jsonify({
                 'success': True,
@@ -1086,7 +1060,8 @@ def create_app():
     def api_alerts():
         """Get products that have hit their price targets or discount thresholds."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             state = load_state(flask_app.config['STATE_FILE'])
             history = PriceHistory(flask_app.config['HISTORY_DB'])
 
@@ -1198,7 +1173,8 @@ def create_app():
     def api_compare_groups():
         """Return competitive groups built from identifiers in state."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             state = load_state(flask_app.config['STATE_FILE'])
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
             try:
@@ -1219,7 +1195,8 @@ def create_app():
         Returns {updated: n, failed: m} and does not modify prices.
         """
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             state = load_state(flask_app.config['STATE_FILE'])
             extractor = PriceExtractor(
                 user_agent=flask_app.config['USER_AGENT'],
@@ -1254,7 +1231,8 @@ def create_app():
         Returns list of suggestions: [{nameA, urlA, nameB, urlB, similarity}]
         """
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             # Build normalized names
             items = []
             for p in products:
@@ -1315,7 +1293,8 @@ def create_app():
     def api_failures():
         """Get detailed failure information for all products."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
             state = load_state(flask_app.config['STATE_FILE'])
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             
@@ -1387,6 +1366,44 @@ def create_app():
         except (OSError, sqlite3.Error) as e:
             return _safe_error(e)
 
+    @flask_app.route('/api/export/products')
+    @require_api_key_for_reads
+    def api_export_products():
+        """Export all products as CSV."""
+        try:
+            from io import StringIO
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
+            output = StringIO()
+            writer = __import__('csv').writer(output)
+            from sale_monitor.storage.csv_products import CSV_COLUMNS
+            writer.writerow(CSV_COLUMNS)
+            for p in products:
+                writer.writerow([
+                    p.name, p.url,
+                    p.target_price if p.target_price is not None else '',
+                    p.discount_threshold if p.discount_threshold is not None else '',
+                    p.selector,
+                    'true' if p.enabled else 'false',
+                    p.notification_cooldown_hours,
+                    p.selector_source or '',
+                    getattr(p, 'currency', 'CAD'),
+                    getattr(p, 'group', '') or '',
+                    ','.join(getattr(p, 'tags', []) or []),
+                    ','.join(getattr(p, 'alert_rules', []) or []),
+                    ','.join(getattr(p, 'notification_channels', []) or []),
+                ])
+            output.seek(0)
+            return Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={
+                    'Content-Disposition': f'attachment; filename=products_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                }
+            )
+        except (OSError, sqlite3.Error) as e:
+            return _safe_error(e)
+
     @flask_app.route('/api/history/all')
     @require_api_key_for_reads
     def api_history_all():
@@ -1405,9 +1422,10 @@ def create_app():
             history = PriceHistory(flask_app.config['HISTORY_DB'])
             ex_service = ExchangeRateService(cache_handler=history)
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
-            # Prefer names from current products.csv to avoid stale/incorrect names in DB
+            # Prefer names from products DB
             try:
-                current_products = read_products(flask_app.config['PRODUCTS_CSV'])
+                product_store = flask_app.config['PRODUCT_STORE']
+                current_products = product_store.get_all()
                 name_by_url = {p.url: p.name for p in current_products}
             except (OSError, ValueError):
                 name_by_url = {}
@@ -1415,7 +1433,7 @@ def create_app():
             # Get list of products that have any history
             db_products = history.get_all_products()  # List[Tuple[url, name]]
             
-            # If DB is empty but we have CSV products, use those to enable fallback synthesis
+            # If DB has no history but we have products, use those to enable fallback synthesis
             if not db_products and name_by_url:
                 products = [(url, name) for url, name in name_by_url.items()]
             else:
@@ -1542,7 +1560,8 @@ def create_app():
             product_count = 0
             enabled_count = 0
             try:
-                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                product_store = flask_app.config['PRODUCT_STORE']
+                products = product_store.get_all()
                 product_count = len(products)
                 enabled_count = sum(1 for p in products if p.enabled)
             except (OSError, ValueError):
@@ -1615,7 +1634,8 @@ def create_app():
             return _safe_error(e)
 
     @flask_app.route('/api/settings/notifications', methods=['POST'])
-    @limiter.limit("10 per minute")
+    @_rate_limit("10 per minute")
+    @require_api_key
     def api_save_notification_settings():
         """Save notification config. Accepts full notifications object."""
         try:
@@ -1633,7 +1653,8 @@ def create_app():
             return _safe_error(e)
 
     @flask_app.route('/api/settings/notifications/test', methods=['POST'])
-    @limiter.limit("5 per minute")
+    @_rate_limit("5 per minute")
+    @require_api_key
     def api_test_notification():
         """Send a test notification to a specified channel."""
         try:
@@ -2044,7 +2065,8 @@ def create_app():
     def _warmup_images_once():
         """Prefetch and cache images for enabled products with basic cross-process throttling."""
         try:
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            product_store = flask_app.config['PRODUCT_STORE']
+            products = product_store.get_all()
         except Exception:
             return
         from pathlib import Path
@@ -2109,42 +2131,6 @@ def create_app():
         t.start()
     
     return flask_app
-
-
-CSV_COLUMNS = [
-    'name', 'url', 'target_price', 'discount_threshold', 'selector',
-    'enabled', 'notification_cooldown_hours', 'selector_source', 'currency',
-    'group', 'tags', 'alert_rules', 'notification_channels',
-]
-
-
-def _write_products_csv(filepath, products):
-    """Helper to write products to CSV file."""
-    lock = FileLock(filepath)
-    lock.acquire()
-    try:
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(CSV_COLUMNS)
-            for p in products:
-                writer.writerow([
-                    p.name,
-                    p.url,
-                    p.target_price if p.target_price is not None else '',
-                    p.discount_threshold if p.discount_threshold is not None else '',
-                    p.selector,
-                    'true' if p.enabled else 'false',
-                    p.notification_cooldown_hours,
-                    p.selector_source if p.selector_source else '',
-                    p.currency if hasattr(p, 'currency') else 'CAD',
-                    p.group if getattr(p, 'group', None) else '',
-                    ','.join(getattr(p, 'tags', []) or []),
-                    ','.join(getattr(p, 'alert_rules', []) or []),
-                    ','.join(getattr(p, 'notification_channels', []) or []),
-                ])
-    finally:
-        lock.release()
-
 
 
 if __name__ == '__main__':

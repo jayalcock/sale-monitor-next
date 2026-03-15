@@ -27,11 +27,11 @@ def test_run_migrations_on_fresh_db(tmp_path):
     _create_bare_db(db)
 
     applied = run_migrations(str(db))
-    assert applied == 2
+    assert applied == 3
 
     with sqlite3.connect(str(db)) as conn:
         version = get_current_version(conn)
-    assert version == 2
+    assert version == 3
 
 
 def test_migrations_are_idempotent(tmp_path):
@@ -43,7 +43,7 @@ def test_migrations_are_idempotent(tmp_path):
     assert applied == 0
 
     with sqlite3.connect(str(db)) as conn:
-        assert get_current_version(conn) == 2
+        assert get_current_version(conn) == 3
 
 
 def test_indices_exist_after_migration(tmp_path):
@@ -80,7 +80,7 @@ def test_partial_migration_resumes(tmp_path):
         conn.commit()
 
     applied = run_migrations(str(db))
-    assert applied == 1
+    assert applied == 2
 
     with sqlite3.connect(str(db)) as conn:
-        assert get_current_version(conn) == 2
+        assert get_current_version(conn) == 3
