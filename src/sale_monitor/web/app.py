@@ -99,12 +99,14 @@ def create_app():
         return jsonify({'error': msg}), 500
 
     def _build_comparison_groups(state: dict, products: list, base_currency: str) -> list:
-        """Group products by shared identifiers (mpn/sku/gtin).
+        """Group products by shared identifiers or explicit CSV group.
 
-        Returns a list of groups: [{group_key, identifiers, items: [{name,url,current_price,price_in_base,currency,last_checked}]}]
+        Priority: CSV group > manual group_key in state > auto-detected identifiers (mpn/sku/gtin).
+        Returns a list of groups: [{group_key, source, identifiers, items: [{name,url,current_price,price_in_base,currency,last_checked}]}]
         """
-        # Map url->product for names
+        # Map url->product for names and CSV group
         name_by_url = {p.url: p.name for p in products}
+        csv_group_by_url = {p.url: p.group for p in products if p.group}
 
         # Helper to compute price_in_base from state when available
         def _item_row(u: str, st: dict) -> dict:
@@ -124,14 +126,21 @@ def create_app():
         for url, st in state.items():
             if not isinstance(st, dict):
                 continue
-            # Manual group key takes precedence when present
+
+            # 1) Explicit CSV group (strongest)
+            csv_group = csv_group_by_url.get(url)
+            # 2) Manual group_key in state
             manual_key = st.get('group_key')
+            # 3) Auto-detected identifiers
             ident = st.get('identifiers') or {}
-            # Choose strongest identifier available
-            key = manual_key or ident.get('mpn') or ident.get('sku') or ident.get('gtin') or ident.get('gtin13')
+            auto_key = ident.get('mpn') or ident.get('sku') or ident.get('gtin') or ident.get('gtin13')
+
+            key = csv_group or manual_key or auto_key
             if not key:
                 continue
-            g = groups.setdefault(key, {'group_key': key, 'identifiers': ident, 'items': []})
+
+            source = 'csv' if csv_group else ('manual' if manual_key else 'auto')
+            g = groups.setdefault(key, {'group_key': key, 'source': source, 'identifiers': ident, 'items': []})
             g['items'].append(_item_row(url, st))
 
         # Only keep groups with at least 2 items (competitive set)
@@ -258,6 +267,7 @@ def create_app():
                     'selector': p.selector,
                     'selector_source': selector_source,
                     'identifiers': state_data.get('identifiers', {}),
+                    'group': getattr(p, 'group', None),
                 })
 
             return jsonify(_paginate(result))
@@ -796,7 +806,8 @@ def create_app():
                 discount_threshold=discount_threshold,
                 selector=data.get('selector', ''),  # Default to empty string if not provided
                 enabled=data.get('enabled', True),
-                notification_cooldown_hours=cooldown_hours
+                notification_cooldown_hours=cooldown_hours,
+                group=data.get('group', '').strip() or None
             )
             
             # Read existing products
@@ -935,7 +946,8 @@ def create_app():
                         discount_threshold=discount_threshold,
                         selector=data.get('selector', p.selector),
                         enabled=data.get('enabled', p.enabled),
-                        notification_cooldown_hours=cooldown_hours
+                        notification_cooldown_hours=cooldown_hours,
+                        group=data.get('group', p.group).strip() if data.get('group') is not None else p.group
                     )
                     found = True
                     break
@@ -953,7 +965,8 @@ def create_app():
                 'notification_cooldown_hours': updated.notification_cooldown_hours,
                 'target_price': updated.target_price,
                 'discount_threshold': updated.discount_threshold,
-                'selector': updated.selector
+                'selector': updated.selector,
+                'group': updated.group
             }})
         except (OSError, ValueError) as e:
             return _safe_error(e)
@@ -1831,7 +1844,7 @@ def _write_products_csv(filepath, products):
     try:
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours', 'selector_source', 'currency'])
+            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours', 'selector_source', 'currency', 'group'])
             for p in products:
                 writer.writerow([
                     p.name,
@@ -1842,7 +1855,8 @@ def _write_products_csv(filepath, products):
                     'true' if p.enabled else 'false',
                     p.notification_cooldown_hours,
                     p.selector_source if p.selector_source else '',
-                    p.currency if hasattr(p, 'currency') else 'CAD'
+                    p.currency if hasattr(p, 'currency') else 'CAD',
+                    p.group if getattr(p, 'group', None) else ''
                 ])
     finally:
         lock.release()

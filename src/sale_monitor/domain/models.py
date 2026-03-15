@@ -15,5 +15,6 @@ class Product:
     current_price: Optional[float] = None
     selector_source: Optional[str] = None  # 'manual', 'auto', 'bookmarklet'
     currency: str = "CAD"  # Currency for target_price and discount calculations
+    group: Optional[str] = None  # Explicit competitive group slug
 
 # Additional models can be defined here as needed for future expansion.

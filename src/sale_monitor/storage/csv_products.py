@@ -54,6 +54,7 @@ def read_products(csv_path: str) -> List[Product]:
                 discount_threshold=_parse_float(row.get("discount_threshold")),
                 enabled=_parse_bool(row.get("enabled", "true")),
                 notification_cooldown_hours=_parse_int(row.get("notification_cooldown_hours"), 24),
+                group=row.get("group", "").strip() or None,
                 selector_source=row.get("selector_source", "").strip() or None,
                 currency=row.get("currency", "CAD").strip() or "CAD",
             )

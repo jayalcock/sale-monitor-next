@@ -109,6 +109,11 @@
                         <label class="block text-sm font-medium text-gray-200">Notification Cooldown (hours)</label>
                         <input type="text" inputmode="numeric" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="notification_cooldown_hours" value="24" placeholder="e.g., 24">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Group <span class="text-gray-400">(optional - for competitive tracking)</span></label>
+                        <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="group" placeholder="e.g., sram-x0-eagle-rd">
+                        <p class="text-xs text-gray-400 mt-1">Products sharing the same group slug are tracked as competitors across vendors.</p>
+                    </div>
                     <div class="flex items-center gap-2">
                         <input type="checkbox" class="h-4 w-4 text-primary-600 bg-gray-700 border-gray-600 rounded" name="enabled" checked>
                         <label class="text-sm text-gray-200">Enabled</label>
@@ -162,6 +167,11 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-200">Notification Cooldown (hours)</label>
                         <input type="text" inputmode="numeric" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="notification_cooldown_hours" id="edit-cooldown" placeholder="e.g., 24">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Group <span class="text-gray-400">(optional - for competitive tracking)</span></label>
+                        <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="group" id="edit-group" placeholder="e.g., sram-x0-eagle-rd">
+                        <p class="text-xs text-gray-400 mt-1">Products sharing the same group slug are tracked as competitors across vendors.</p>
                     </div>
                     <div class="flex items-center gap-2">
                         <input type="checkbox" class="h-4 w-4 text-primary-600 bg-gray-700 border-gray-600 rounded" name="enabled" id="edit-enabled">
@@ -394,7 +404,8 @@ function addProduct() {
         target_price: formData.get('target_price') || null,
         discount_threshold: formData.get('discount_threshold') || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours') || 24,
-        enabled: formData.get('enabled') === 'on'
+        enabled: formData.get('enabled') === 'on',
+        group: formData.get('group') || ''
     };
     
     fetch('/api/product/add', {
@@ -437,6 +448,7 @@ function editProduct(product) {
     document.getElementById('edit-target-price').value = product.target_price || '';
     document.getElementById('edit-discount').value = product.discount_threshold || '';
     document.getElementById('edit-cooldown').value = product.notification_cooldown_hours;
+    document.getElementById('edit-group').value = product.group || '';
     document.getElementById('edit-enabled').checked = product.enabled;
     
     openModal('editProductModal');
@@ -453,7 +465,8 @@ function updateProduct() {
         target_price: formData.get('target_price') || null,
         discount_threshold: formData.get('discount_threshold') || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours'),
-        enabled: formData.get('enabled') === 'on'
+        enabled: formData.get('enabled') === 'on',
+        group: formData.get('group') || ''
     };
     
     fetch('/api/product/update', {
