@@ -176,7 +176,8 @@ function normalizeUrl(u) {
 function resolveProductUrl(rawUrl) {
     return fetch(`/api/products`)
         .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to fetch product list')))
-        .then(products => {
+        .then(resp => {
+            const products = Array.isArray(resp) ? resp : (resp.items || []);
             // Save for navigation if not already loaded
             allProducts = Array.isArray(allProducts) && allProducts.length ? allProducts : products;
             const rawNorm = normalizeUrl(rawUrl);
@@ -271,7 +272,8 @@ function loadProductInfo(url) {
             if (!response.ok) throw new Error('Failed to fetch product info');
             return response.json();
         })
-        .then(products => {
+        .then(resp => {
+            const products = Array.isArray(resp) ? resp : (resp.items || []);
             allProducts = products;
             const product = products.find(p => p.url === url);
             if (!product) throw new Error('Product not found');
