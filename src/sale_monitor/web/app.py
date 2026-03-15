@@ -17,8 +17,6 @@ from sale_monitor.storage.json_state import load_state, save_state
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.services.exchange_rates import ExchangeRateService
-from sale_monitor.services.product_discovery import ProductDiscovery
-from sale_monitor.services.discovery_scheduler import DiscoveryScheduler
 from sale_monitor.domain.models import Product
 from sale_monitor.storage.file_lock import FileLock
 from sale_monitor.storage.config_store import load_config, save_config, get_base_currency
@@ -43,20 +41,6 @@ def create_app():
     initial_base_currency = os.getenv('BASE_CURRENCY') or get_base_currency(flask_app.config['CONFIG_FILE'])
     flask_app.config['BASE_CURRENCY'] = initial_base_currency.upper()
     
-    # Initialize discovery scheduler
-    discovery_interval = int(os.getenv('DISCOVERY_INTERVAL_HOURS', '24'))
-    flask_app.discovery_scheduler = DiscoveryScheduler(
-        products_csv=flask_app.config['PRODUCTS_CSV'],
-        state_file=flask_app.config['STATE_FILE'],
-        cache_file=os.getenv('DISCOVERY_CACHE_FILE', 'data/discovery_cache.json'),
-        interval_hours=discovery_interval,
-        user_agent=flask_app.config['USER_AGENT'],
-        timeout=flask_app.config['TIMEOUT']
-    )
-    # Start scheduler if enabled (disabled by default - can cause file lock contention)
-    if os.getenv('ENABLE_AUTO_DISCOVERY', '0').lower() not in ('0', 'false', 'no'):
-        flask_app.discovery_scheduler.start()
-
     # --------------- Rate Limiting ---------------
     try:
         from flask_limiter import Limiter
@@ -1200,159 +1184,6 @@ def create_app():
             save_state(flask_app.config['STATE_FILE'], state)
             return jsonify({'success': True, 'group_key': group_key})
         except (OSError, ValueError) as e:
-            return _safe_error(e)
-    
-    @flask_app.route('/api/discovery/suggest')
-    @require_api_key_for_reads
-    def api_discovery_suggest():
-        """Get smart suggestions for products available at other retailers.
-        
-        Returns cached results from background scanner if available,
-        otherwise performs live scan (slower).
-        """
-        try:
-            # Try cached results first
-            cached = flask_app.discovery_scheduler.get_cached_suggestions()
-            if cached:
-                return jsonify(cached)
-            
-            # Fallback to live scan if no cache
-            logging.info("No cached suggestions, performing live scan")
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            state = load_state(flask_app.config['STATE_FILE'])
-            
-            # Build set of existing URLs
-            existing_urls = {p.url for p in products}
-            
-            # Get all products with identifiers
-            suggestions = []
-            discovery = ProductDiscovery(
-                user_agent=flask_app.config['USER_AGENT'],
-                timeout=flask_app.config['TIMEOUT']
-            )
-            
-            # Discover alternatives for products with identifiers
-            for product in products[:10]:  # Limit to first 10 to avoid long response time
-                product_state = state.get(product.url, {})
-                identifiers = product_state.get('identifiers', {})
-                
-                # Skip if no identifiers
-                if not identifiers:
-                    continue
-                
-                discovered = discovery.discover_products(
-                    product_name=product.name,
-                    identifiers=identifiers,
-                    existing_urls=existing_urls,
-                    current_url=product.url
-                )
-                
-                if discovered:
-                    suggestions.append({
-                        'original_product': {
-                            'name': product.name,
-                            'url': product.url
-                        },
-                        'discovered': discovered[:3],  # Top 3 matches per product
-                        'count': len(discovered)
-                    })
-            
-            return jsonify(suggestions)
-        except Exception as e:
-            logging.error(f"Discovery suggest error: {e}")
-            return _safe_error(e)
-    
-    @flask_app.route('/api/discovery/search')
-    @require_api_key_for_reads
-    def api_discovery_search():
-        """General product search across retailers.
-        
-        Query params:
-            q: search query (required)
-            retailers: comma-separated retailer domains (optional, defaults to all)
-        """
-        try:
-            query = request.args.get('q', '').strip()
-            if not query:
-                return jsonify({'error': 'Query parameter q required'}), 400
-            
-            # Get existing URLs to filter out
-            products = read_products(flask_app.config['PRODUCTS_CSV'])
-            existing_urls = {p.url for p in products}
-            
-            # Get optional retailer filter
-            retailers_param = request.args.get('retailers', '').strip()
-            retailer_domains = [r.strip() for r in retailers_param.split(',')] if retailers_param else None
-            
-            discovery = ProductDiscovery(
-                user_agent=flask_app.config['USER_AGENT'],
-                timeout=flask_app.config['TIMEOUT']
-            )
-            
-            # Search all or specified retailers
-            results = []
-            retailers_to_search = retailer_domains if retailer_domains else list(discovery.RETAILERS.keys())
-            
-            for retailer in retailers_to_search:
-                if retailer not in discovery.RETAILERS:
-                    continue
-                matches = discovery.search_retailer(retailer, query, existing_urls)
-                results.extend(matches)
-            
-            return jsonify({
-                'query': query,
-                'count': len(results),
-                'results': results
-            })
-        except Exception as e:
-            logging.error(f"Discovery search error: {e}")
-            return _safe_error(e)
-    
-    @flask_app.route('/api/discovery/status')
-    @require_api_key_for_reads
-    def api_discovery_status():
-        """Get discovery scanner status and metadata."""
-        try:
-            cache_info = flask_app.discovery_scheduler.get_cache_info()
-            return jsonify({
-                'enabled': os.getenv('ENABLE_AUTO_DISCOVERY', '1').lower() not in ('0', 'false', 'no'),
-                'interval_hours': int(os.getenv('DISCOVERY_INTERVAL_HOURS', '24')),
-                'last_scan': cache_info.get('last_scan'),
-                'next_scan': cache_info.get('next_scan'),
-                'suggestions_count': cache_info.get('suggestion_count', 0),
-                'cache_file': flask_app.discovery_scheduler.cache_file
-            })
-        except Exception as e:
-            logging.error(f"Discovery status error: {e}")
-            return _safe_error(e)
-    
-    @flask_app.route('/api/discovery/scan', methods=['POST'])
-    @require_api_key
-    @_rate_limit("1 per minute")
-    def api_discovery_scan():
-        """Trigger immediate discovery scan."""
-        try:
-            logging.info("Manual discovery scan triggered")
-            suggestions = flask_app.discovery_scheduler.discover_all()
-            
-            # Update cache
-            from datetime import datetime, timezone
-            cache = {
-                'suggestions': suggestions,
-                'last_scan': datetime.now(timezone.utc).isoformat(),
-                'next_scan': datetime.now(timezone.utc).replace(
-                    hour=(datetime.now(timezone.utc).hour + flask_app.discovery_scheduler.interval_hours) % 24
-                ).isoformat()
-            }
-            flask_app.discovery_scheduler._save_cache(cache)
-            
-            return jsonify({
-                'success': True,
-                'suggestions_count': len(suggestions),
-                'suggestions': suggestions
-            })
-        except Exception as e:
-            logging.error(f"Discovery scan error: {e}")
             return _safe_error(e)
     
     @flask_app.route('/api/failures')

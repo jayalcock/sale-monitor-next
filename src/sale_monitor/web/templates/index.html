@@ -26,15 +26,6 @@
         </div>
     </div>
 
-    <!-- Settings Panel -->
-    <div class="mt-6 bg-gray-800 shadow rounded-lg border border-gray-700 p-4">
-        <label class="flex items-center gap-3 cursor-pointer">
-            <input type="checkbox" id="discovery-toggle" class="w-4 h-4 rounded bg-gray-700 border-gray-600 text-primary-600 focus:ring-primary-500">
-            <span class="text-sm text-gray-300">Enable Product Discovery</span>
-        </label>
-        <p class="mt-2 text-xs text-gray-500">When enabled, automatically searches for products at other retailers (may be slow)</p>
-    </div>
-
     <!-- Filters and Search -->
     <div class="mt-6 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
         <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
@@ -116,28 +107,7 @@
     </style>
 </div>
 
-<!-- Smart Suggestions -->
-<div id="suggestions-section" class="mt-8 px-4 sm:px-0" style="display:none;">
-    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
-        <div class="px-4 py-5 sm:p-6">
-            <div class="sm:flex sm:items-center sm:justify-between">
-                <div>
-                    <h3 class="text-lg leading-6 font-medium text-white">Smart Suggestions</h3>
-                    <p class="mt-1 text-sm text-gray-400">Found these products at other retailers</p>
-                </div>
-                <div class="flex gap-2">
-                    <button id="status-btn" class="text-primary-400 hover:text-primary-300 text-sm" onclick="showDiscoveryStatus()">ℹ️ Status</button>
-                    <button id="scan-now-btn" class="text-primary-400 hover:text-primary-300 text-sm" onclick="triggerManualScan()">🔍 Scan Now</button>
-                    <button id="refresh-suggestions-btn" class="text-primary-400 hover:text-primary-300 text-sm">🔄 Refresh</button>
-                </div>
-            </div>
-            <div id="suggestions-error" class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700" role="alert" style="display:none;">
-                Unable to load suggestions.
-            </div>
-            <div id="suggestions-list" class="mt-4 space-y-4"></div>
-        </div>
-    </div>
-</div>
+
 
 <!-- Loading State -->
 <div id="loading" class="mt-8 flex justify-center">
@@ -455,6 +425,7 @@ function renderProductCard(product) {
                     </div>
                     <div class="mt-auto flex flex-col gap-2">
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-primary-600 text-sm font-medium rounded-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button>
+                        <a href="https://www.google.com/search?tbm=shop&q=${encodeURIComponent(product.name)}" target="_blank" rel="noopener" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500">🔍 Find Elsewhere</a>
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                     </div>
                 </div>
@@ -541,6 +512,7 @@ function renderProductRow(product) {
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
+                    <a href="https://www.google.com/search?tbm=shop&q=${encodeURIComponent(product.name)}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
                     <button class="inline-flex items-center px-3 py-2 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
             </td>
@@ -1325,24 +1297,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Restore discovery toggle state from localStorage on page load
+// Initial page load
 window.addEventListener('DOMContentLoaded', () => {
-    const discoveryToggle = document.getElementById('discovery-toggle');
-    if (discoveryToggle) {
-        const enabled = localStorage.getItem('discovery-enabled') !== '0';
-        discoveryToggle.checked = enabled;
-        if (!enabled) {
-            document.getElementById('suggestions-section').style.display = 'none';
-        }
-    }
-    
     // Initial load - sequence to ensure groups ready before products render
     try {
         loadGroups().then(() => {
             loadProducts();
             loadTrends();
-            // Load suggestions only if discovery is enabled (skip on initial load to speed up)
-            // Will be loaded after page interactive
         }).catch(err => console.error('Initial load error:', err));
     } catch (e) {
         console.error('Initial load exception:', e);
@@ -1361,169 +1322,11 @@ window.addEventListener('DOMContentLoaded', () => {
     }, 60000);
 });
 
-// Discovery toggle handler
-document.getElementById('discovery-toggle')?.addEventListener('change', (e) => {
-    localStorage.setItem('discovery-enabled', e.target.checked ? '1' : '0');
-    if (e.target.checked) {
-        document.getElementById('suggestions-section').style.display = 'block';
-        loadSuggestions();
-    } else {
-        document.getElementById('suggestions-section').style.display = 'none';
-    }
-});
-
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (refreshInterval) clearInterval(refreshInterval);
     if (trendsChart) trendsChart.destroy();
 });
-
-function loadSuggestions() {
-    const section = document.getElementById('suggestions-section');
-    const list = document.getElementById('suggestions-list');
-    const errEl = document.getElementById('suggestions-error');
-    if (errEl) errEl.style.display = 'none';
-    
-    fetch('/api/discovery/suggest')
-        .then(r => r.ok ? r.json() : Promise.reject('Failed to fetch suggestions'))
-        .then(suggestions => {
-            if (!Array.isArray(suggestions) || suggestions.length === 0) {
-                section.style.display = 'none';
-                return;
-            }
-            
-            const html = suggestions.map(s => {
-                const original = s.original_product;
-                const discovered = s.discovered || [];
-                const count = s.count || 0;
-                
-                return `
-                    <div class="rounded-md border border-gray-700 bg-gray-900 p-4">
-                        <div class="flex items-start justify-between mb-3">
-                            <div>
-                                <div class="text-sm font-medium text-white">${escapeHtml(original.name)}</div>
-                                <div class="text-xs text-gray-400 mt-1">Found at ${count} other retailer${count !== 1 ? 's' : ''}</div>
-                            </div>
-                        </div>
-                        <div class="space-y-2">
-                            ${discovered.map(d => `
-                                <div class="flex items-center justify-between py-2 border-t border-gray-700">
-                                    <div class="flex-1 mr-4">
-                                        <a href="${d.url}" target="_blank" class="text-primary-400 hover:text-primary-300 text-sm">${escapeHtml(d.name)}</a>
-                                        <div class="text-xs text-gray-500 mt-1">${d.retailer} ${d.price_text ? '• ' + d.price_text : ''}</div>
-                                    </div>
-                                    <button onclick="addDiscovered('${d.url.replace(/'/g, "\\'")}', '${d.name.replace(/'/g, "\\'")}', '${original.url.replace(/'/g, "\\'")}', this)" class="inline-flex items-center px-3 py-1 rounded-md text-xs font-medium bg-primary-600 text-white hover:bg-primary-700">
-                                        + Add
-                                    </button>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-            
-            list.innerHTML = html;
-            section.style.display = 'block';
-        })
-        .catch(err => {
-            console.error('Suggestions error:', err);
-            section.style.display = 'none';
-            if (errEl) errEl.style.display = 'block';
-        });
-}
-
-function addDiscovered(url, name, originalUrl, btn) {
-    if (!confirm(`Add "${name}" to your monitoring list?`)) return;
-    
-    btn.disabled = true;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '⏳';
-    
-    // Add the product
-    fetch('/api/products', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            url: url,
-            name: name,
-            enabled: true,
-            target_price: null,
-            discount_threshold: 15
-        })
-    })
-    .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
-    .then(() => {
-        // Link with original product
-        return fetch('/api/compare/link', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({urlA: originalUrl, urlB: url})
-        });
-    })
-    .then(() => {
-        showSuccess(`Added "${name}" and linked with original product`);
-        btn.innerHTML = '✓ Added';
-        setTimeout(() => {
-            loadProducts();
-            loadGroups();
-            loadSuggestions();
-        }, 500);
-    })
-    .catch(err => {
-        showError(err.error || err.message || 'Failed to add product');
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-    });
-}
-
-async function showDiscoveryStatus() {
-    try {
-        const res = await fetch('/api/discovery/status');
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.error || 'Failed to fetch status');
-        
-        const lastScan = data.last_scan ? new Date(data.last_scan).toLocaleString() : 'Never';
-        const nextScan = data.next_scan ? new Date(data.next_scan).toLocaleString() : 'Unknown';
-        
-        alert(`Auto-Discovery Status
-        
-Enabled: ${data.enabled ? 'Yes' : 'No'}
-Interval: Every ${data.interval_hours} hours
-Last Scan: ${lastScan}
-Next Scan: ${nextScan}
-Suggestions Found: ${data.suggestions_count}
-Cache File: ${data.cache_file}`);
-    } catch (err) {
-        showError('Failed to load discovery status: ' + (err.message || err));
-    }
-}
-
-async function triggerManualScan() {
-    const btn = document.getElementById('scan-now-btn');
-    if (!btn) return;
-    
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Scanning...';
-    
-    try {
-        const res = await fetch('/api/discovery/scan', { method: 'POST' });
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.error || 'Scan failed');
-        
-        showSuccess(`Scan complete! Found ${data.suggestions_count} suggestions.`);
-        setTimeout(() => loadSuggestions(), 500);
-    } catch (err) {
-        showError('Scan failed: ' + (err.message || err));
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-    }
-}
-
-document.getElementById('refresh-suggestions-btn')?.addEventListener('click', loadSuggestions);
 
 </script>
 {% endblock %}
