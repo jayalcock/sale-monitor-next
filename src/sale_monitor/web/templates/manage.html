@@ -44,13 +44,15 @@
     <a href="/" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm font-medium">← Back to Dashboard</a>
     </div>
 
-<div id="loading" class="flex justify-center my-8">
-    <svg class="animate-spin h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-    </svg>
-    <span class="sr-only">Loading...</span>
+<div id="loading" class="my-8 space-y-3">
+    {% for _ in range(4) %}
+    <div class="skeleton-card flex items-center gap-4">
+        <div class="skeleton" style="width: 200px; height: 0.875rem;"></div>
+        <div class="skeleton" style="width: 120px; height: 0.75rem;"></div>
+        <div class="skeleton ml-auto" style="width: 80px; height: 0.75rem;"></div>
     </div>
+    {% endfor %}
+</div>
 
 <div id="products-table" style="display: none;">
     <div class="overflow-x-auto rounded-lg border border-gray-700">
@@ -438,7 +440,7 @@ function testBookmarkletPicker() {
         }
         const cssSelector = path.join(' > ');
         navigator.clipboard.writeText(cssSelector).then(() => {
-            alert('CSS Selector copied:\n' + cssSelector);
+            pushToast('CSS Selector copied: ' + cssSelector, 'success');
         }).catch(() => {
             prompt('Copy this CSS selector:', cssSelector);
         });
@@ -456,16 +458,12 @@ function testBookmarkletPicker() {
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
     closeModal('bookmarkletModal');
-    alert('Selector Picker Activated!\nClick on any element on this page to copy its CSS selector.');
+    pushToast('Selector Picker Activated! Click on any element to copy its CSS selector.', 'info', 8000);
 }
 
 let productsData = [];
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml - provided by base.html
 
 function loadProducts() {
     fetch('/api/products')
@@ -718,10 +716,9 @@ function updateProduct() {
     .catch(error => showError(error.message));
 }
 
-function deleteProduct(url, name) {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) {
-        return;
-    }
+async function deleteProduct(url, name) {
+    const ok = await smConfirm(`Are you sure you want to delete "${name}"?`, { title: 'Delete Product', okText: 'Delete' });
+    if (!ok) return;
     
     fetch('/api/product/delete', {
         method: 'POST',
@@ -766,18 +763,11 @@ function toggleProduct(url) {
     .catch(error => showError(error.message));
 }
 
-function showError(message) {
-    document.getElementById('error-message').textContent = message;
-    document.getElementById('error-alert').style.display = 'block';
-    setTimeout(() => {
-        document.getElementById('error-alert').style.display = 'none';
-    }, 5000);
-}
+// showError - provided by base.html
 
-function bulkAutoDetect() {
-    if (!confirm('This will attempt to auto-detect price selectors for all products. Continue?')) {
-        return;
-    }
+async function bulkAutoDetect() {
+    const ok = await smConfirm('This will attempt to auto-detect price selectors for all products. Continue?', { title: 'Bulk Auto-Detect', okText: 'Continue', okClass: 'primary' });
+    if (!ok) return;
     
     const btn = document.getElementById('bulkAutoDetectBtn');
     const originalText = btn.innerHTML;
@@ -801,8 +791,7 @@ function bulkAutoDetect() {
         if (result.error) {
             showError(result.error);
         } else {
-            const msg = `Auto-detection completed!\n\nSuccessful: ${result.successful}\nFailed: ${result.failed}\n\nCheck the updated selectors in the table below.`;
-            alert(msg);
+            showSuccess(`Auto-detection done: ${result.successful} found, ${result.failed} failed`);
             loadProducts();
         }
     })
@@ -820,14 +809,14 @@ function simplifyUrl(inputId) {
     const originalUrl = inputEl.value.trim();
     
     if (!originalUrl) {
-        alert('Please enter a URL first');
+        pushToast('Please enter a URL first', 'warning');
         return;
     }
     
     const simplified = getSimplifiedUrl(originalUrl);
     
     if (simplified === originalUrl) {
-        alert('URL is already simplified or simplification not available for this retailer');
+        pushToast('URL is already simplified or simplification not available for this retailer', 'info');
         return;
     }
     

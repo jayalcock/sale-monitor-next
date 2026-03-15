@@ -133,13 +133,16 @@
 
 
 <!-- Loading State -->
-<div id="loading" class="mt-8 flex justify-center">
-    <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm text-gray-300">
-        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-primary-600" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        Loading...
+<div id="loading" class="mt-8 px-4 sm:px-0">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {% for _ in range(6) %}
+        <div class="skeleton-card">
+            <div class="skeleton skeleton-heading" style="width: {{ [60, 75, 50, 65, 80, 55][loop.index0 % 6] }}%"></div>
+            <div class="skeleton skeleton-text-sm" style="width: 40%"></div>
+            <div class="mt-4 skeleton skeleton-text" style="width: 30%"></div>
+            <div class="skeleton skeleton-text-sm" style="width: 55%"></div>
+        </div>
+        {% endfor %}
     </div>
 </div>
 
@@ -211,24 +214,21 @@
 </div>
 
 <!-- Error Alert -->
-<div id="error-alert" class="mt-8 px-4 sm:px-0 rounded-md bg-red-50 p-4" role="alert" style="display: none;">
-    <div class="flex">
-        <div class="flex-shrink-0">
-            <svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-        </div>
-        <div class="ml-3">
-            <h3 class="text-sm font-medium text-red-800">Error</h3>
-            <div class="mt-2 text-sm text-red-700">
-                <span id="error-message"></span>
+<div id="error-alert" class="mt-8 px-4 sm:px-0" role="alert" style="display: none;">
+    <div class="rounded-md bg-red-900/50 border border-red-700 p-4">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-300">Error</h3>
+                <div class="mt-2 text-sm text-red-400"><span id="error-message"></span></div>
             </div>
         </div>
     </div>
 </div>
-
-<!-- Toast Container -->
-<div id="toast-stack" aria-live="polite" aria-atomic="true" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 max-w-md w-full px-4"></div>
 
 <style>
 .chart-responsive-wrapper {
@@ -367,48 +367,6 @@
     height: 100%;
     object-fit: contain;
     object-position: center;
-}
-
-/* Toast animations */
-.sm-toast {
-    pointer-events: auto;
-    border-radius: 0.5rem;
-    padding: 1rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    font-size: 0.875rem;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    animation: slideIn 180ms ease-out;
-    position: relative;
-}
-
-.sm-toast-success { 
-    background-color: #10b981;
-    color: white;
-}
-.sm-toast-error { 
-    background-color: #ef4444;
-    color: white;
-}
-
-.sm-toast button.close-btn {
-    background: none;
-    border: none;
-    color: inherit;
-    font-size: 1.25rem;
-    line-height: 1;
-    cursor: pointer;
-    opacity: 0.8;
-    transition: opacity .15s;
-    padding: 0;
-    margin-left: auto;
-}
-.sm-toast button.close-btn:hover { opacity: 1; }
-
-@keyframes slideIn {
-    from { opacity: 0; transform: translateY(-0.5rem); }
-    to { opacity: 1; transform: translateY(0); }
 }
 
 /* View toggle active state */
@@ -1343,10 +1301,9 @@ function renderTrendsLegend(chart) {
     };
 }
 
-function deleteProduct(url, name) {
-    if (!confirm(`Delete "${name}"?\n\nThis will permanently remove the product and its history.`)) {
-        return;
-    }
+async function deleteProduct(url, name) {
+    const ok = await smConfirm(`Delete "${name}"?\n\nThis will permanently remove the product and its history.`, { title: 'Delete Product', okText: 'Delete' });
+    if (!ok) return;
     
     fetchWithTimeout('/api/product/delete', {
         method: 'POST',
@@ -1454,53 +1411,7 @@ function checkGroupPrices(btn, groupKey) {
     });
 }
 
-function showError(message) {
-    pushToast('error', message);
-}
-
-function showSuccess(message) {
-    pushToast('success', message);
-}
-
-function pushToast(type, message, opts) {
-    const stack = document.getElementById('toast-stack');
-    if (!stack) return;
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const div = document.createElement('div');
-    div.className = `sm-toast sm-toast-${type === 'error' ? 'error' : 'success'}`;
-    div.id = id;
-    div.setAttribute('role', 'alert');
-    div.setAttribute('aria-live', 'assertive');
-    div.setAttribute('aria-atomic', 'true');
-    div.innerHTML = `
-        <div style="flex:1;">
-            <strong style="display:block;font-weight:600;">${type === 'error' ? 'Error' : 'Success'}</strong>
-            <span>${escapeHtml(String(message))}</span>
-        </div>
-        <button class="close-btn" aria-label="Close" title="Dismiss" onclick="dismissToast('${id}')">&times;</button>
-    `;
-    stack.appendChild(div);
-    const ttl = (opts && opts.ttl) || (type === 'error' ? 6000 : 4000);
-    setTimeout(() => dismissToast(id), ttl);
-}
-
-function dismissToast(id) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.style.transition = 'opacity 150ms ease, transform 150ms ease';
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(-6px)';
-    setTimeout(() => el.remove(), 160);
-}
-
-function escapeHtml(str) {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// showError, showSuccess, pushToast, dismissToast, escapeHtml - provided by base.html
 
 function updateLastUpdate(products) {
     try {
@@ -1511,11 +1422,11 @@ function updateLastUpdate(products) {
             el.textContent = 'Last update: no data';
             return;
         }
-        // Latest by time value
         const latest = timestamps.reduce((a, b) => (b > a ? b : a));
-        // Format local time
         const formatted = latest.toLocaleString(undefined, {hour12: false});
-        el.textContent = `Last update: ${formatted}`;
+        const ago = timeAgo(latest.toISOString());
+        el.textContent = `Last update: ${ago}`;
+        el.title = formatted;
     } catch (e) {
         // Fail silently
     }

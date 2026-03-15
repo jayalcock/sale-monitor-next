@@ -42,7 +42,20 @@
   function renderGroups(groups) {
     const container = document.getElementById('groupsContainer');
     if (!Array.isArray(groups) || groups.length === 0) {
-      container.innerHTML = `<div class="p-4 rounded bg-gray-800 text-gray-200 text-sm">No competitor groups detected yet. Run a price check and ensure identifiers are present. Add more products via <a class="underline text-primary-400" href="/manage">Manage</a>.</div>`;
+      container.innerHTML = `
+        <div class="text-center py-12">
+          <svg class="mx-auto h-16 w-16 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 7a1 1 0 011-1h10a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 7a1 1 0 011-1h7a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z"></path>
+          </svg>
+          <h3 class="mt-3 text-lg font-medium text-gray-300">No Competitor Groups Yet</h3>
+          <p class="mt-2 text-sm text-gray-400 max-w-md mx-auto">Groups are formed from product identifiers (MPN/SKU/GTIN) or manual links. Add products with matching identifiers to see competitive comparisons.</p>
+          <div class="mt-5">
+            <a href="/manage" class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              Add Products
+            </a>
+          </div>
+        </div>`;
       return;
     }
 
@@ -76,10 +89,7 @@
     el.classList.toggle('hidden');
   }
 
-  function showError(msg) {
-    const container = document.getElementById('groupsContainer');
-    container.innerHTML = `<div class="p-4 rounded bg-red-900 text-red-200 text-sm">${msg}</div>`;
-  }
+  // showError - provided by base.html (pushToast-based)
 
   document.getElementById('refreshBtn').addEventListener('click', fetchGroups);
   fetchGroups();
@@ -119,7 +129,7 @@ async function linkPair(urlA, urlB) {
     await fetchGroups();
     await fetchSuggestions();
   } catch (e) {
-    alert('Link failed: ' + e);
+    showError('Link failed: ' + e);
   }
 }
   </script>

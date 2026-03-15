@@ -8,9 +8,6 @@
     <p class="mt-1 text-sm text-gray-400">Configure notifications, webhooks, and default alert channels.</p>
 </div>
 
-<!-- Toast Container -->
-<div id="toast-stack" aria-live="polite" aria-atomic="true" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 max-w-md w-full px-4"></div>
-
 <!-- SMTP Settings -->
 <div class="mt-8 px-4 sm:px-0">
     <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
@@ -105,21 +102,7 @@
 <script>
 let currentConfig = {};
 
-function escapeHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function pushToast(type, message) {
-    const stack = document.getElementById('toast-stack');
-    if (!stack) return;
-    const id = 'toast-' + Date.now();
-    const div = document.createElement('div');
-    div.className = 'sm-toast sm-toast-' + (type === 'error' ? 'error' : 'success');
-    div.id = id;
-    div.innerHTML = '<div style="flex:1;"><strong>' + (type === 'error' ? 'Error' : 'Success') + '</strong><br>' + escapeHtml(message) + '</div><button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:1.2em;">&times;</button>';
-    stack.appendChild(div);
-    setTimeout(() => { const el = document.getElementById(id); if (el) el.remove(); }, type === 'error' ? 6000 : 4000);
-}
+// escapeHtml, pushToast - provided by base.html
 
 function loadSettings() {
     fetch('/api/settings/notifications')
@@ -128,7 +111,7 @@ function loadSettings() {
             currentConfig = data;
             populateForm(data);
         })
-        .catch(err => pushToast('error', String(err)));
+        .catch(err => showError(String(err)));
 }
 
 function populateForm(cfg) {
@@ -263,13 +246,13 @@ function saveSettings() {
     .then(r => r.json().then(j => ({ok: r.ok, data: j})))
     .then(({ok, data}) => {
         if (!ok || data.error) {
-            pushToast('error', data.error || 'Save failed');
+            showError(data.error || 'Save failed');
         } else {
-            pushToast('success', 'Settings saved');
+            showSuccess('Settings saved');
             loadSettings();
         }
     })
-    .catch(err => pushToast('error', String(err)))
+    .catch(err => showError(String(err)))
     .finally(() => {
         btn.disabled = false;
         btn.textContent = 'Save Settings';
@@ -277,7 +260,7 @@ function saveSettings() {
 }
 
 function testChannel(channel) {
-    pushToast('success', 'Sending test to ' + channel + '...');
+    pushToast('Sending test to ' + channel + '...', 'info');
     fetch('/api/settings/notifications/test', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -286,28 +269,14 @@ function testChannel(channel) {
     .then(r => r.json().then(j => ({ok: r.ok, data: j})))
     .then(({ok, data}) => {
         if (!ok || data.error) {
-            pushToast('error', data.error || 'Test failed');
+            showError(data.error || 'Test failed');
         } else {
-            pushToast('success', 'Test sent to ' + channel);
+            showSuccess('Test sent to ' + channel);
         }
     })
-    .catch(err => pushToast('error', String(err)));
+    .catch(err => showError(String(err)));
 }
 
 document.addEventListener('DOMContentLoaded', loadSettings);
 </script>
-<style>
-.sm-toast {
-    pointer-events: auto;
-    border-radius: 0.5rem;
-    padding: 1rem;
-    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-    font-size: 0.875rem;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-}
-.sm-toast-success { background-color: #10b981; color: white; }
-.sm-toast-error { background-color: #ef4444; color: white; }
-</style>
 {% endblock %}

@@ -20,12 +20,16 @@
     </div>
 </div>
 
-<div id="loading" class="flex justify-center my-8">
-    <svg class="animate-spin h-8 w-8 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-    </svg>
-    <span class="sr-only">Loading...</span>
+<div id="loading" class="my-8 space-y-3">
+    {% for _ in range(3) %}
+    <div class="skeleton-card flex items-center gap-4">
+        <div class="skeleton" style="width: 180px; height: 0.875rem;"></div>
+        <div class="skeleton" style="width: 60px; height: 1.25rem; border-radius: 9999px;"></div>
+        <div class="skeleton" style="width: 60px; height: 1.25rem; border-radius: 9999px;"></div>
+        <div class="skeleton" style="width: 80px; height: 0.75rem;"></div>
+        <div class="skeleton ml-auto" style="width: 100px; height: 1.5rem; border-radius: 0.375rem;"></div>
+    </div>
+    {% endfor %}
 </div>
 
 <div id="failures-container" style="display: none;">
@@ -110,11 +114,11 @@ function renderFailureRow(failure) {
                 <div>${failure.failed_checks} failed</div>
                 <div class="text-xs text-gray-500">${failure.total_checks} total</div>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                ${formatDate(failure.last_success)}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" title="${formatDate(failure.last_success)}">
+                ${timeAgo(failure.last_success)}
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                ${formatDate(failure.last_failure)}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" title="${formatDate(failure.last_failure)}">
+                ${timeAgo(failure.last_failure)}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                 <button onclick="retryProduct('${failure.url}', this)" class="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white mr-2">
@@ -146,14 +150,14 @@ function retryProduct(url, button) {
     })
     .then(result => {
         if (result.error) {
-            alert('Error: ' + result.error);
+            showError('Error: ' + result.error);
         } else {
-            alert(`✓ Success! Price: ${formatPrice(result.price)} ${result.currency}`);
-            loadFailures(); // Refresh the list
+            showSuccess(`✓ Success! Price: ${formatPrice(result.price)} ${result.currency}`);
+            loadFailures();
         }
     })
     .catch(error => {
-        alert('Error: ' + error.message);
+        showError('Error: ' + error.message);
     })
     .finally(() => {
         button.disabled = false;
