@@ -38,6 +38,9 @@
     <button class="inline-flex items-center px-3 py-2 rounded-md bg-yellow-500 text-gray-900 hover:bg-yellow-400 text-sm font-medium" onclick="bulkAutoDetect()" id="bulkAutoDetectBtn">
         🔍 Try Auto-Detect All
     </button>
+    <button class="inline-flex items-center px-3 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 text-sm font-medium" onclick="openModal('bulkImportModal')">
+        📥 Bulk Import
+    </button>
     <a href="/" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm font-medium">← Back to Dashboard</a>
     </div>
 
@@ -114,6 +117,30 @@
                         <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="group" placeholder="e.g., sram-x0-eagle-rd">
                         <p class="text-xs text-gray-400 mt-1">Products sharing the same group slug are tracked as competitors across vendors.</p>
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Tags <span class="text-gray-400">(comma-separated)</span></label>
+                        <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="tags" placeholder="e.g., wishlist, bikes, high-priority">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Alert Rules</label>
+                        <div class="mt-1 flex flex-wrap gap-3">
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_target" checked> Target price</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_discount" checked> Discount %</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_any_change"> Any change</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_price_drop"> Price drop</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_below_avg"> Below avg</label>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Default: target + discount. Choose which conditions trigger notifications.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Notification Channels</label>
+                        <div class="mt-1 flex flex-wrap gap-3">
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_smtp" checked> Email</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_discord"> Discord</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_slack"> Slack</label>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Which channels to use for this product's notifications.</p>
+                    </div>
                     <div class="flex items-center gap-2">
                         <input type="checkbox" class="h-4 w-4 text-primary-600 bg-gray-700 border-gray-600 rounded" name="enabled" checked>
                         <label class="text-sm text-gray-200">Enabled</label>
@@ -173,6 +200,30 @@
                         <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="group" id="edit-group" placeholder="e.g., sram-x0-eagle-rd">
                         <p class="text-xs text-gray-400 mt-1">Products sharing the same group slug are tracked as competitors across vendors.</p>
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Tags <span class="text-gray-400">(comma-separated)</span></label>
+                        <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="tags" id="edit-tags" placeholder="e.g., wishlist, bikes, high-priority">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Alert Rules</label>
+                        <div class="mt-1 flex flex-wrap gap-3">
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_target" id="edit-alert-target"> Target price</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_discount" id="edit-alert-discount"> Discount %</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_any_change" id="edit-alert-any-change"> Any change</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_price_drop" id="edit-alert-price-drop"> Price drop</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="alert_below_avg" id="edit-alert-below-avg"> Below avg</label>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Choose which conditions trigger notifications for this product.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Notification Channels</label>
+                        <div class="mt-1 flex flex-wrap gap-3">
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_smtp" id="edit-channel-smtp"> Email</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_discord" id="edit-channel-discord"> Discord</label>
+                            <label class="flex items-center gap-1 text-sm text-gray-200"><input type="checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 rounded" name="channel_slack" id="edit-channel-slack"> Slack</label>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Which channels to use for this product's notifications.</p>
+                    </div>
                     <div class="flex items-center gap-2">
                         <input type="checkbox" class="h-4 w-4 text-primary-600 bg-gray-700 border-gray-600 rounded" name="enabled" id="edit-enabled">
                         <label class="text-sm text-gray-200">Enabled</label>
@@ -217,6 +268,65 @@
     </div>
 </div>
 
+<!-- Bulk Import Modal -->
+<div id="bulkImportModal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/60" onclick="closeModal('bulkImportModal')"></div>
+    <div class="relative mx-auto mt-16 w-full max-w-3xl p-4">
+        <div class="bg-gray-800 border border-gray-700 rounded-lg shadow">
+            <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 class="text-lg font-semibold text-white">Bulk Import Products</h3>
+                <button class="text-gray-300 hover:text-white" onclick="closeModal('bulkImportModal')">✕</button>
+            </div>
+            <div class="p-4 space-y-4">
+                <!-- Tab switcher -->
+                <div class="flex border-b border-gray-700">
+                    <button id="tab-paste" class="px-4 py-2 text-sm font-medium text-primary-400 border-b-2 border-primary-400" onclick="switchImportTab('paste')">Paste Data</button>
+                    <button id="tab-upload" class="px-4 py-2 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200" onclick="switchImportTab('upload')">Upload CSV</button>
+                </div>
+                <!-- Paste tab -->
+                <div id="import-paste" class="space-y-3">
+                    <p class="text-sm text-gray-300">Paste product data — one product per line. Minimum: <code class="text-primary-300">name, url</code></p>
+                    <p class="text-xs text-gray-400">Format: <code class="text-gray-300">name, url, target_price, discount_threshold, tags</code> (comma-separated)</p>
+                    <textarea id="import-text" rows="8" class="w-full bg-gray-900 border border-gray-600 rounded-md text-white font-mono text-xs px-3 py-2" placeholder="SRAM X0 Eagle AXS, https://example.com/sram-x0, 299.99, 15, wishlist
+Fox 36 Factory, https://example.com/fox-36, 899.00, 10, bikes|forks"></textarea>
+                </div>
+                <!-- Upload tab -->
+                <div id="import-upload" class="space-y-3 hidden">
+                    <p class="text-sm text-gray-300">Upload a CSV file with columns: <code class="text-primary-300">name, url</code> (required), plus optional columns.</p>
+                    <input type="file" id="import-file" accept=".csv,.txt" class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary-600 file:text-white hover:file:bg-primary-700">
+                </div>
+                <!-- Preview area -->
+                <div id="import-preview" class="hidden">
+                    <h4 class="text-sm font-medium text-gray-200 mb-2">Preview (<span id="import-count">0</span> products)</h4>
+                    <div class="max-h-48 overflow-y-auto border border-gray-700 rounded">
+                        <table class="w-full text-xs">
+                            <thead class="bg-gray-700 sticky top-0">
+                                <tr>
+                                    <th class="px-2 py-1 text-left text-gray-300">Name</th>
+                                    <th class="px-2 py-1 text-left text-gray-300">URL</th>
+                                    <th class="px-2 py-1 text-left text-gray-300">Target</th>
+                                    <th class="px-2 py-1 text-left text-gray-300">Discount</th>
+                                    <th class="px-2 py-1 text-left text-gray-300">Tags</th>
+                                </tr>
+                            </thead>
+                            <tbody id="import-preview-body" class="text-gray-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Results area -->
+                <div id="import-results" class="hidden rounded-md border px-4 py-3 text-sm"></div>
+            </div>
+            <div class="flex items-center justify-between gap-2 p-4 border-t border-gray-700">
+                <button type="button" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-600 text-white hover:bg-gray-500 text-sm" onclick="previewImport()">Preview</button>
+                <div class="flex gap-2">
+                    <button type="button" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm" onclick="closeModal('bulkImportModal')">Cancel</button>
+                    <button type="button" id="import-submit" class="inline-flex items-center px-3 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed" onclick="submitBulkImport()" disabled>Import</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Bookmarklet Modal -->
 <div id="bookmarkletModal" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/60" onclick="closeModal('bookmarkletModal')"></div>
@@ -227,39 +337,56 @@
                 <button class="text-gray-300 hover:text-white" onclick="closeModal('bookmarkletModal')">✕</button>
             </div>
             <div class="p-4 text-gray-200">
-                <p>Use this bookmarklet to easily find price selectors on product pages:</p>
+                <p class="mb-4">The Selector Picker helps you find the CSS selector for any price element on a product page. This is useful when auto-detection doesn't find the price.</p>
                 
-                <h4 class="mt-3 font-semibold">📖 How to Use:</h4>
-                <ol class="list-decimal ml-6 space-y-1 text-gray-300">
-                    <li>Drag the button below to your bookmarks bar, or right-click and bookmark it</li>
-                    <li>Navigate to any product page where you want to monitor prices</li>
-                    <li>Click the bookmarklet in your bookmarks bar</li>
-                    <li>Click on the price element on the page</li>
-                    <li>The CSS selector will be copied to your clipboard automatically</li>
-                    <li>Paste it into the "CSS Selector" field when adding/editing a product</li>
-                </ol>
-                
-                <h4 class="mt-3 font-semibold">🔖 Bookmarklet:</h4>
-                <div class="rounded-md border border-blue-700 bg-blue-900/40 text-blue-100 px-3 py-3">
-                    <p class="mb-2"><strong>Drag this link to your bookmarks bar:</strong></p>
+                <h4 class="font-semibold text-white">Step 1 — Install</h4>
+                <div class="mt-2 rounded-md border border-blue-700 bg-blue-900/40 text-blue-100 px-4 py-3">
+                    <p class="mb-2 text-sm"><strong>Drag this button to your bookmarks bar:</strong></p>
                     <a href="javascript:(function(){const style=document.createElement('style');style.textContent='.sm-picker-highlight{outline:3px solid #00ff00 !important;background:rgba(0,255,0,0.1) !important;cursor:crosshair !important;}';document.head.appendChild(style);let selectedEl=null;const onClick=e=>{e.preventDefault();e.stopPropagation();const el=e.target;const path=[];let current=el;while(current&&current!==document.body){let selector='';if(current.id){selector='#'+current.id;path.unshift(selector);break;}else{let sibling=current;let nth=1;while(sibling.previousElementSibling){sibling=sibling.previousElementSibling;nth++;}const tag=current.tagName.toLowerCase();const classes=Array.from(current.classList).filter(c=>c!=='sm-picker-highlight').map(c=>'.'+c).join('');selector=tag+classes+(nth>1?':nth-child('+nth+')':'');path.unshift(selector);}current=current.parentElement;}const cssSelector=path.join(' > ');navigator.clipboard.writeText(cssSelector).then(()=>{alert('✅ CSS Selector copied to clipboard:\n'+cssSelector);}).catch(()=>{prompt('Copy this CSS selector:',cssSelector);});cleanup();};const onMouseOver=e=>{e.target.classList.add('sm-picker-highlight');};const onMouseOut=e=>{e.target.classList.remove('sm-picker-highlight');};const cleanup=()=>{document.removeEventListener('click',onClick,true);document.removeEventListener('mouseover',onMouseOver,true);document.removeEventListener('mouseout',onMouseOut,true);style.remove();};document.addEventListener('click',onClick,true);document.addEventListener('mouseover',onMouseOver,true);document.addEventListener('mouseout',onMouseOut,true);alert('🎯 Selector Picker Activated!\nClick on the price element on this page.');})();" 
-                       class="inline-flex items-center px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-medium" 
+                       class="inline-flex items-center px-5 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-lg cursor-grab active:cursor-grabbing border-2 border-green-400/50" 
                        onclick="return false;">
                         🎯 Pick Selector
                     </a>
+                    <p class="mt-2 text-xs text-blue-200">Can't drag? Right-click the button &#8594; <em>Bookmark This Link</em> (Firefox) or copy the link address and create a bookmark manually.</p>
                 </div>
-                
-                <h4 class="mt-3 font-semibold">💡 Tips:</h4>
-                <ul class="list-disc ml-6 space-y-1 text-gray-300">
-                    <li>Click on the actual price number, not surrounding elements</li>
-                    <li>The tool will highlight elements as you hover over them</li>
-                    <li>Generated selectors work best when they're specific to the price element</li>
-                    <li>If auto-detection works for your site, you don't need a manual selector</li>
+
+                <h4 class="mt-4 font-semibold text-white">Step 2 — Use</h4>
+                <ol class="mt-2 list-decimal ml-6 space-y-1 text-gray-300 text-sm">
+                    <li>Navigate to the product page you want to monitor</li>
+                    <li>Click <strong>Pick Selector</strong> in your bookmarks bar</li>
+                    <li>Hover over the page &mdash; elements highlight in green as you move</li>
+                    <li>Click the price element &mdash; the CSS selector is copied to your clipboard</li>
+                    <li>Return here and paste it into the <strong>CSS Selector</strong> field when adding or editing a product</li>
+                </ol>
+
+                <h4 class="mt-4 font-semibold text-white">Step 3 — Test It</h4>
+                <div class="mt-2 rounded-md border border-gray-600 bg-gray-900 px-4 py-3">
+                    <p class="text-sm text-gray-300 mb-2">Try the picker right here to make sure it works in your browser:</p>
+                    <div class="flex items-center gap-4">
+                        <button type="button" id="bookmarklet-test-btn"
+                            class="inline-flex items-center px-4 py-2 rounded-md bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
+                            onclick="testBookmarkletPicker()">
+                            Test on This Page
+                        </button>
+                        <span class="text-gray-500 text-sm">Click any element on this page after activating</span>
+                    </div>
+                </div>
+
+                <h4 class="mt-4 font-semibold text-white">Tips</h4>
+                <ul class="mt-2 list-disc ml-6 space-y-1 text-gray-300 text-sm">
+                    <li>Click the actual price number, not a surrounding container</li>
+                    <li>If auto-detection works for your site, you don't need a manual selector at all</li>
+                    <li>Some sites block bookmarklets via Content Security Policy &mdash; use the browser console fallback if needed</li>
                 </ul>
                 
-                <div class="mt-3 rounded-md border border-yellow-700 bg-yellow-900/40 text-yellow-100 px-3 py-2">
-                    <strong>Note:</strong> This bookmarklet requires clipboard access. If it doesn't work, you'll see a prompt to copy the selector manually.
-                </div>
+                <details class="mt-4">
+                    <summary class="text-sm font-medium text-gray-400 cursor-pointer hover:text-gray-200">Browser-specific notes</summary>
+                    <div class="mt-2 text-sm text-gray-400 space-y-2 pl-4">
+                        <p><strong class="text-gray-300">Chrome/Edge:</strong> Show the bookmarks bar with Ctrl+Shift+B (Cmd+Shift+B on Mac). Drag the green button directly onto it.</p>
+                        <p><strong class="text-gray-300">Firefox:</strong> If dragging doesn't work, right-click the green button and choose "Bookmark Link".</p>
+                        <p><strong class="text-gray-300">Safari:</strong> Enable "Show Develop menu" in Preferences &#8594; Advanced, then drag the button to your Favorites bar.</p>
+                    </div>
+                </details>
             </div>
             <div class="flex items-center justify-end gap-2 p-4 border-t border-gray-700">
                 <button type="button" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm" onclick="closeModal('bookmarkletModal')">Close</button>
@@ -280,6 +407,56 @@ function openModal(id) {
 function closeModal(id) {
     const el = document.getElementById(id);
     if (el) el.classList.add('hidden');
+}
+
+function testBookmarkletPicker() {
+    const style = document.createElement('style');
+    style.textContent = '.sm-picker-highlight{outline:3px solid #00ff00 !important;background:rgba(0,255,0,0.1) !important;cursor:crosshair !important;}';
+    document.head.appendChild(style);
+    const onClick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const el = e.target;
+        const path = [];
+        let current = el;
+        while (current && current !== document.body) {
+            let selector = '';
+            if (current.id) {
+                selector = '#' + current.id;
+                path.unshift(selector);
+                break;
+            } else {
+                let sibling = current;
+                let nth = 1;
+                while (sibling.previousElementSibling) { sibling = sibling.previousElementSibling; nth++; }
+                const tag = current.tagName.toLowerCase();
+                const classes = Array.from(current.classList).filter(c => c !== 'sm-picker-highlight').map(c => '.' + c).join('');
+                selector = tag + classes + (nth > 1 ? ':nth-child(' + nth + ')' : '');
+                path.unshift(selector);
+            }
+            current = current.parentElement;
+        }
+        const cssSelector = path.join(' > ');
+        navigator.clipboard.writeText(cssSelector).then(() => {
+            alert('CSS Selector copied:\n' + cssSelector);
+        }).catch(() => {
+            prompt('Copy this CSS selector:', cssSelector);
+        });
+        cleanup();
+    };
+    const onMouseOver = e => { e.target.classList.add('sm-picker-highlight'); };
+    const onMouseOut = e => { e.target.classList.remove('sm-picker-highlight'); };
+    const cleanup = () => {
+        document.removeEventListener('click', onClick, true);
+        document.removeEventListener('mouseover', onMouseOver, true);
+        document.removeEventListener('mouseout', onMouseOut, true);
+        style.remove();
+    };
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('mouseover', onMouseOver, true);
+    document.addEventListener('mouseout', onMouseOut, true);
+    closeModal('bookmarkletModal');
+    alert('Selector Picker Activated!\nClick on any element on this page to copy its CSS selector.');
 }
 
 let productsData = [];
@@ -397,6 +574,21 @@ function addProduct() {
     const form = document.getElementById('addProductForm');
     const formData = new FormData(form);
     
+    const alertRules = [];
+    if (formData.get('alert_target')) alertRules.push('target');
+    if (formData.get('alert_discount')) alertRules.push('discount');
+    if (formData.get('alert_any_change')) alertRules.push('any_change');
+    if (formData.get('alert_price_drop')) alertRules.push('price_drop');
+    if (formData.get('alert_below_avg')) alertRules.push('below_avg');
+    
+    const channels = [];
+    if (formData.get('channel_smtp')) channels.push('smtp');
+    if (formData.get('channel_discord')) channels.push('discord');
+    if (formData.get('channel_slack')) channels.push('slack');
+    
+    const tagsRaw = formData.get('tags') || '';
+    const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    
     const data = {
         name: formData.get('name'),
         url: formData.get('url'),
@@ -405,7 +597,10 @@ function addProduct() {
         discount_threshold: formData.get('discount_threshold') || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours') || 24,
         enabled: formData.get('enabled') === 'on',
-        group: formData.get('group') || ''
+        group: formData.get('group') || '',
+        tags: tags,
+        alert_rules: alertRules,
+        notification_channels: channels
     };
     
     fetch('/api/product/add', {
@@ -449,6 +644,20 @@ function editProduct(product) {
     document.getElementById('edit-discount').value = product.discount_threshold || '';
     document.getElementById('edit-cooldown').value = product.notification_cooldown_hours;
     document.getElementById('edit-group').value = product.group || '';
+    document.getElementById('edit-tags').value = (product.tags || []).join(', ');
+    
+    const rules = product.alert_rules || ['target', 'discount'];
+    document.getElementById('edit-alert-target').checked = rules.includes('target');
+    document.getElementById('edit-alert-discount').checked = rules.includes('discount');
+    document.getElementById('edit-alert-any-change').checked = rules.includes('any_change');
+    document.getElementById('edit-alert-price-drop').checked = rules.includes('price_drop');
+    document.getElementById('edit-alert-below-avg').checked = rules.includes('below_avg');
+    
+    const channels = product.notification_channels || ['smtp'];
+    document.getElementById('edit-channel-smtp').checked = channels.includes('smtp');
+    document.getElementById('edit-channel-discord').checked = channels.includes('discord');
+    document.getElementById('edit-channel-slack').checked = channels.includes('slack');
+    
     document.getElementById('edit-enabled').checked = product.enabled;
     
     openModal('editProductModal');
@@ -458,6 +667,21 @@ function updateProduct() {
     const form = document.getElementById('editProductForm');
     const formData = new FormData(form);
     
+    const alertRules = [];
+    if (formData.get('alert_target')) alertRules.push('target');
+    if (formData.get('alert_discount')) alertRules.push('discount');
+    if (formData.get('alert_any_change')) alertRules.push('any_change');
+    if (formData.get('alert_price_drop')) alertRules.push('price_drop');
+    if (formData.get('alert_below_avg')) alertRules.push('below_avg');
+    
+    const channels = [];
+    if (formData.get('channel_smtp')) channels.push('smtp');
+    if (formData.get('channel_discord')) channels.push('discord');
+    if (formData.get('channel_slack')) channels.push('slack');
+    
+    const tagsRaw = formData.get('tags') || '';
+    const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    
     const data = {
         url: document.getElementById('edit-url-hidden').value,
         name: formData.get('name'),
@@ -466,7 +690,10 @@ function updateProduct() {
         discount_threshold: formData.get('discount_threshold') || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours'),
         enabled: formData.get('enabled') === 'on',
-        group: formData.get('group') || ''
+        group: formData.get('group') || '',
+        tags: tags,
+        alert_rules: alertRules,
+        notification_channels: channels
     };
     
     fetch('/api/product/update', {
@@ -690,6 +917,155 @@ function getSimplifiedUrl(url) {
     } catch (e) {
         return url;
     }
+}
+
+// ── Bulk Import ─────────────────────────────────────────────
+
+let parsedImportProducts = [];
+
+function switchImportTab(tab) {
+    document.getElementById('import-paste').classList.toggle('hidden', tab !== 'paste');
+    document.getElementById('import-upload').classList.toggle('hidden', tab !== 'upload');
+    document.getElementById('tab-paste').classList.toggle('text-primary-400', tab === 'paste');
+    document.getElementById('tab-paste').classList.toggle('border-primary-400', tab === 'paste');
+    document.getElementById('tab-paste').classList.toggle('text-gray-400', tab !== 'paste');
+    document.getElementById('tab-paste').classList.toggle('border-transparent', tab !== 'paste');
+    document.getElementById('tab-upload').classList.toggle('text-primary-400', tab === 'upload');
+    document.getElementById('tab-upload').classList.toggle('border-primary-400', tab === 'upload');
+    document.getElementById('tab-upload').classList.toggle('text-gray-400', tab !== 'upload');
+    document.getElementById('tab-upload').classList.toggle('border-transparent', tab !== 'upload');
+    // Reset preview
+    document.getElementById('import-preview').classList.add('hidden');
+    document.getElementById('import-results').classList.add('hidden');
+    document.getElementById('import-submit').disabled = true;
+    parsedImportProducts = [];
+}
+
+function parsePastedText(text) {
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    return lines.map(line => {
+        const parts = line.split(',').map(s => s.trim());
+        return {
+            name: parts[0] || '',
+            url: parts[1] || '',
+            target_price: parts[2] || null,
+            discount_threshold: parts[3] || null,
+            tags: parts[4] ? parts[4].split('|').map(t => t.trim()).filter(Boolean) : []
+        };
+    }).filter(p => p.name && p.url);
+}
+
+function parseCSVFile(text) {
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const nameIdx = headers.indexOf('name');
+    const urlIdx = headers.indexOf('url');
+    if (nameIdx === -1 || urlIdx === -1) return [];
+
+    return lines.slice(1).map(line => {
+        const parts = line.split(',').map(s => s.trim());
+        return {
+            name: parts[nameIdx] || '',
+            url: parts[urlIdx] || '',
+            target_price: parts[headers.indexOf('target_price')] || null,
+            discount_threshold: parts[headers.indexOf('discount_threshold')] || null,
+            tags: (parts[headers.indexOf('tags')] || '').split('|').map(t => t.trim()).filter(Boolean),
+            selector: parts[headers.indexOf('selector')] || '',
+            group: parts[headers.indexOf('group')] || ''
+        };
+    }).filter(p => p.name && p.url);
+}
+
+function previewImport() {
+    const pasteTab = !document.getElementById('import-paste').classList.contains('hidden');
+    
+    if (pasteTab) {
+        const text = document.getElementById('import-text').value;
+        if (!text.trim()) { showError('Paste some product data first'); return; }
+        parsedImportProducts = parsePastedText(text);
+    } else {
+        const file = document.getElementById('import-file').files[0];
+        if (!file) { showError('Select a CSV file first'); return; }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            parsedImportProducts = parseCSVFile(e.target.result);
+            renderImportPreview();
+        };
+        reader.readAsText(file);
+        return;
+    }
+    renderImportPreview();
+}
+
+function renderImportPreview() {
+    const tbody = document.getElementById('import-preview-body');
+    const preview = document.getElementById('import-preview');
+    const results = document.getElementById('import-results');
+    results.classList.add('hidden');
+    
+    if (!parsedImportProducts.length) {
+        showError('No valid products found. Check your format.');
+        preview.classList.add('hidden');
+        document.getElementById('import-submit').disabled = true;
+        return;
+    }
+    
+    document.getElementById('import-count').textContent = parsedImportProducts.length;
+    tbody.innerHTML = parsedImportProducts.map(p => `
+        <tr class="border-t border-gray-700">
+            <td class="px-2 py-1">${escapeHtml(p.name)}</td>
+            <td class="px-2 py-1 truncate max-w-[200px]">${escapeHtml(p.url)}</td>
+            <td class="px-2 py-1">${p.target_price || '-'}</td>
+            <td class="px-2 py-1">${p.discount_threshold || '-'}</td>
+            <td class="px-2 py-1">${(p.tags || []).join(', ') || '-'}</td>
+        </tr>
+    `).join('');
+    preview.classList.remove('hidden');
+    document.getElementById('import-submit').disabled = false;
+}
+
+function submitBulkImport() {
+    if (!parsedImportProducts.length) return;
+    
+    const btn = document.getElementById('import-submit');
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+    
+    fetch('/api/products/bulk-import', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ products: parsedImportProducts })
+    })
+    .then(r => r.json())
+    .then(result => {
+        const el = document.getElementById('import-results');
+        if (result.error) {
+            el.className = 'rounded-md border border-red-700 bg-red-900/40 text-red-200 px-4 py-3 text-sm';
+            el.textContent = result.error;
+        } else {
+            const parts = [`Added ${result.added} product(s).`];
+            if (result.skipped) parts.push(`Skipped ${result.skipped} duplicate(s).`);
+            if (result.errors && result.errors.length) parts.push(`${result.errors.length} error(s): ${result.errors.join('; ')}`);
+            el.className = 'rounded-md border border-green-700 bg-green-900/40 text-green-200 px-4 py-3 text-sm';
+            el.innerHTML = parts.join('<br>');
+            if (result.added > 0) loadProducts();
+        }
+        el.classList.remove('hidden');
+        btn.textContent = 'Import';
+        btn.disabled = false;
+    })
+    .catch(err => {
+        showError(err.message);
+        btn.textContent = 'Import';
+        btn.disabled = false;
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 // Load on page load

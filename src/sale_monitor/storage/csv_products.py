@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional  # noqa: F811 (List used by _parse_list)
 
 from sale_monitor.domain.models import Product
 
@@ -32,6 +32,13 @@ def _parse_int(value: Optional[str], default: int) -> int:
         return default
 
 
+def _parse_list(value: Optional[str]) -> List[str]:
+    """Parse a comma-separated string into a list of trimmed, non-empty strings."""
+    if value is None:
+        return []
+    return [s.strip() for s in value.split(",") if s.strip()]
+
+
 def read_products(csv_path: str) -> List[Product]:
     path = Path(csv_path)
     if not path.exists():
@@ -57,6 +64,9 @@ def read_products(csv_path: str) -> List[Product]:
                 group=row.get("group", "").strip() or None,
                 selector_source=row.get("selector_source", "").strip() or None,
                 currency=row.get("currency", "CAD").strip() or "CAD",
+                tags=_parse_list(row.get("tags")),
+                alert_rules=_parse_list(row.get("alert_rules")),
+                notification_channels=_parse_list(row.get("notification_channels")),
             )
             products.append(product)
     return products

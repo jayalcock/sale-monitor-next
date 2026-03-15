@@ -19,7 +19,7 @@ from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.domain.models import Product
 from sale_monitor.storage.file_lock import FileLock
-from sale_monitor.storage.config_store import load_config, save_config, get_base_currency
+from sale_monitor.storage.config_store import load_config, save_config, get_base_currency, load_notification_config, save_notification_config
 from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
 
 logger = logging.getLogger(__name__)
@@ -268,6 +268,9 @@ def create_app():
                     'selector_source': selector_source,
                     'identifiers': state_data.get('identifiers', {}),
                     'group': getattr(p, 'group', None),
+                    'tags': getattr(p, 'tags', []),
+                    'alert_rules': getattr(p, 'alert_rules', []),
+                    'notification_channels': getattr(p, 'notification_channels', []),
                 })
 
             return jsonify(_paginate(result))
@@ -798,6 +801,14 @@ def create_app():
             except ValueError as ve:
                 return jsonify({'error': str(ve)}), 400
 
+            # Parse list fields
+            def _parse_csv_list(val):
+                if not val:
+                    return []
+                if isinstance(val, list):
+                    return [s.strip() for s in val if isinstance(s, str) and s.strip()]
+                return [s.strip() for s in str(val).split(',') if s.strip()]
+
             # Create product
             new_product = Product(
                 name=data['name'],
@@ -807,7 +818,10 @@ def create_app():
                 selector=data.get('selector', ''),  # Default to empty string if not provided
                 enabled=data.get('enabled', True),
                 notification_cooldown_hours=cooldown_hours,
-                group=data.get('group', '').strip() or None
+                group=data.get('group', '').strip() or None,
+                tags=_parse_csv_list(data.get('tags')),
+                alert_rules=_parse_csv_list(data.get('alert_rules')),
+                notification_channels=_parse_csv_list(data.get('notification_channels')),
             )
             
             # Read existing products
@@ -939,6 +953,13 @@ def create_app():
                     except ValueError as ve:
                         return jsonify({'error': str(ve)}), 400
 
+                    def _parse_csv_list(val, current):
+                        if val is None:
+                            return current
+                        if isinstance(val, list):
+                            return [s.strip() for s in val if isinstance(s, str) and s.strip()]
+                        return [s.strip() for s in str(val).split(',') if s.strip()]
+
                     products[i] = Product(
                         name=data.get('name', p.name),
                         url=url,
@@ -947,7 +968,10 @@ def create_app():
                         selector=data.get('selector', p.selector),
                         enabled=data.get('enabled', p.enabled),
                         notification_cooldown_hours=cooldown_hours,
-                        group=data.get('group', p.group).strip() if data.get('group') is not None else p.group
+                        group=data.get('group', p.group).strip() if data.get('group') is not None else p.group,
+                        tags=_parse_csv_list(data.get('tags'), getattr(p, 'tags', [])),
+                        alert_rules=_parse_csv_list(data.get('alert_rules'), getattr(p, 'alert_rules', [])),
+                        notification_channels=_parse_csv_list(data.get('notification_channels'), getattr(p, 'notification_channels', [])),
                     )
                     found = True
                     break
@@ -970,7 +994,93 @@ def create_app():
             }})
         except (OSError, ValueError) as e:
             return _safe_error(e)
-    
+
+    @flask_app.route('/api/products/bulk-import', methods=['POST'])
+    @require_api_key
+    def api_bulk_import():
+        """Bulk import products from JSON array."""
+        try:
+            data = request.get_json()
+            items = data.get('products', [])
+            if not isinstance(items, list) or not items:
+                return jsonify({'error': 'products must be a non-empty array'}), 400
+            if len(items) > 100:
+                return jsonify({'error': 'Maximum 100 products per import'}), 400
+
+            products = read_products(flask_app.config['PRODUCTS_CSV'])
+            existing_urls = {p.url for p in products}
+
+            def _parse_csv_list(val):
+                if not val:
+                    return []
+                if isinstance(val, list):
+                    return [s.strip() for s in val if isinstance(s, str) and s.strip()]
+                return [s.strip() for s in str(val).split(',') if s.strip()]
+
+            added = []
+            skipped = []
+            errors = []
+
+            for idx, item in enumerate(items):
+                row_label = item.get('name') or f'row {idx + 1}'
+                name = (item.get('name') or '').strip()
+                url = (item.get('url') or '').strip()
+
+                if not name or not url:
+                    errors.append(f'{row_label}: name and url are required')
+                    continue
+
+                parsed_url = urlparse(url)
+                if parsed_url.scheme not in ('http', 'https'):
+                    errors.append(f'{row_label}: URL must use http or https')
+                    continue
+
+                if len(name) > 500:
+                    errors.append(f'{row_label}: name too long')
+                    continue
+
+                if url in existing_urls:
+                    skipped.append(name)
+                    continue
+
+                try:
+                    tp = float(item['target_price']) if item.get('target_price') not in (None, '') else None
+                    dt = float(item['discount_threshold']) if item.get('discount_threshold') not in (None, '') else None
+                except (TypeError, ValueError):
+                    errors.append(f'{row_label}: invalid numeric value')
+                    continue
+
+                new_product = Product(
+                    name=name,
+                    url=url,
+                    target_price=tp,
+                    discount_threshold=dt,
+                    selector=item.get('selector', ''),
+                    enabled=item.get('enabled', True),
+                    notification_cooldown_hours=int(item.get('notification_cooldown_hours', 24)),
+                    group=(item.get('group') or '').strip() or None,
+                    tags=_parse_csv_list(item.get('tags')),
+                    alert_rules=_parse_csv_list(item.get('alert_rules')),
+                    notification_channels=_parse_csv_list(item.get('notification_channels')),
+                )
+                products.append(new_product)
+                existing_urls.add(url)
+                added.append(name)
+
+            if added:
+                _write_products_csv(flask_app.config['PRODUCTS_CSV'], products)
+
+            return jsonify({
+                'success': True,
+                'added': len(added),
+                'skipped': len(skipped),
+                'errors': errors,
+                'added_names': added,
+                'skipped_names': skipped,
+            })
+        except (OSError, ValueError) as e:
+            return _safe_error(e)
+
     @flask_app.route('/api/alerts')
     @require_api_key_for_reads
     def api_alerts():
@@ -1390,26 +1500,190 @@ def create_app():
         except (OSError, ValueError, sqlite3.Error) as e:
             return _safe_error(e)
 
+    # Track application start time for uptime reporting
+    _app_start_time = time.time()
+
     @flask_app.route('/api/health')
     @require_api_key_for_reads
     def api_health():
-        """Basic health check: DB integrity and history row count."""
+        """Lightweight health check for Docker/uptime probes."""
         try:
             with sqlite3.connect(flask_app.config['HISTORY_DB']) as conn:
-                try:
+                conn.execute("SELECT 1 FROM price_history LIMIT 1")
+            return jsonify({'status': 'ok'})
+        except Exception:
+            return jsonify({'status': 'error'}), 500
+
+    @flask_app.route('/api/health/detailed')
+    @require_api_key_for_reads
+    def api_health_detailed():
+        """Detailed health check: DB integrity, product counts, uptime, cache age."""
+        try:
+            # DB integrity + row count
+            db_ok = False
+            rows = 0
+            try:
+                with sqlite3.connect(flask_app.config['HISTORY_DB']) as conn:
                     ok_row = conn.execute("PRAGMA integrity_check").fetchone()
-                    ok = bool(ok_row and ok_row[0] == 'ok')
-                except sqlite3.Error:
-                    ok = False
-                try:
+                    db_ok = bool(ok_row and ok_row[0] == 'ok')
                     row = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()
                     rows = int(row[0]) if row else 0
-                except sqlite3.Error:
-                    rows = 0
-            return jsonify({'integrity_ok': ok, 'rows': rows})
+            except sqlite3.Error:
+                pass
+
+            # DB file size
+            db_size_mb = None
+            try:
+                db_size_mb = round(os.path.getsize(flask_app.config['HISTORY_DB']) / (1024 * 1024), 2)
+            except OSError:
+                pass
+
+            # Product counts
+            product_count = 0
+            enabled_count = 0
+            try:
+                products = read_products(flask_app.config['PRODUCTS_CSV'])
+                product_count = len(products)
+                enabled_count = sum(1 for p in products if p.enabled)
+            except (OSError, ValueError):
+                pass
+
+            # Last check time from state
+            last_check = None
+            try:
+                state = load_state(flask_app.config['STATE_FILE'])
+                timestamps = [
+                    rec.get('last_checked', '')
+                    for rec in state.values()
+                    if isinstance(rec, dict) and rec.get('last_checked')
+                ]
+                if timestamps:
+                    last_check = max(timestamps)
+            except (OSError, ValueError):
+                pass
+
+            # Exchange rate cache age
+            exchange_rate_age = None
+            try:
+                with sqlite3.connect(flask_app.config['HISTORY_DB']) as conn:
+                    er_row = conn.execute(
+                        "SELECT MAX(timestamp) FROM exchange_rates"
+                    ).fetchone()
+                    if er_row and er_row[0]:
+                        from datetime import datetime as _dt
+                        cached_at = _dt.fromisoformat(er_row[0].replace('Z', '+00:00'))
+                        age_seconds = (datetime.now(timezone.utc) - cached_at.replace(tzinfo=timezone.utc if cached_at.tzinfo is None else cached_at.tzinfo)).total_seconds()
+                        exchange_rate_age = round(age_seconds)
+            except (sqlite3.Error, ValueError, TypeError):
+                pass
+
+            uptime_seconds = round(time.time() - _app_start_time)
+
+            return jsonify({
+                'status': 'ok' if db_ok else 'degraded',
+                'integrity_ok': db_ok,
+                'rows': rows,
+                'db_size_mb': db_size_mb,
+                'product_count': product_count,
+                'enabled_count': enabled_count,
+                'last_check': last_check,
+                'exchange_rate_cache_age_seconds': exchange_rate_age,
+                'uptime_seconds': uptime_seconds,
+            })
         except (sqlite3.Error, OSError, ValueError) as e:
             logger.error("Health check failed: %s", e, exc_info=True)
-            return jsonify({'integrity_ok': False, 'error': 'Health check failed'}), 500
+            return jsonify({'status': 'error', 'error': 'Health check failed'}), 500
+
+    # ---------------- Settings / Notification Config -----------------
+
+    @flask_app.route('/settings')
+    def settings_page():
+        return render_template('settings.html')
+
+    @flask_app.route('/api/settings/notifications')
+    @require_api_key_for_reads
+    def api_get_notification_settings():
+        """Return notification config with password masked."""
+        try:
+            cfg = load_notification_config(flask_app.config['CONFIG_FILE'])
+            # Mask SMTP password
+            smtp = cfg.get('smtp', {})
+            if smtp.get('password'):
+                smtp['password'] = '********'
+            return jsonify(cfg)
+        except (OSError, ValueError) as e:
+            return _safe_error(e)
+
+    @flask_app.route('/api/settings/notifications', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def api_save_notification_settings():
+        """Save notification config. Accepts full notifications object."""
+        try:
+            data = request.get_json(force=True)
+            if not isinstance(data, dict):
+                return jsonify({'error': 'Expected JSON object'}), 400
+            # If password is masked placeholder, preserve the existing one
+            existing = load_notification_config(flask_app.config['CONFIG_FILE'])
+            smtp = data.get('smtp', {})
+            if isinstance(smtp, dict) and smtp.get('password') == '********':
+                smtp['password'] = existing.get('smtp', {}).get('password', '')
+            save_notification_config(flask_app.config['CONFIG_FILE'], data)
+            return jsonify({'status': 'saved'})
+        except (OSError, ValueError) as e:
+            return _safe_error(e)
+
+    @flask_app.route('/api/settings/notifications/test', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def api_test_notification():
+        """Send a test notification to a specified channel."""
+        try:
+            data = request.get_json(force=True)
+            channel = data.get('channel', 'smtp')
+
+            if channel == 'smtp':
+                cfg = load_notification_config(flask_app.config['CONFIG_FILE'])
+                smtp = cfg.get('smtp', {})
+                if not smtp.get('server') or not smtp.get('to_email'):
+                    return jsonify({'error': 'SMTP not configured'}), 400
+                from sale_monitor.services.notifications import NotificationManager, SmtpConfig
+                smtp_cfg = SmtpConfig(
+                    server=smtp['server'], port=int(smtp.get('port', 587)),
+                    username=smtp.get('username', ''), password=smtp.get('password', ''),
+                    from_email=smtp.get('from_email', ''), to_email=smtp['to_email'],
+                    enable=True, use_starttls=smtp.get('use_starttls', True),
+                )
+                mgr = NotificationManager(smtp_cfg)
+                mgr.send_sale_notification(
+                    product_name='Test Product', product_url='https://example.com',
+                    current_price=29.99, currency='CAD', triggered_by='test',
+                )
+                return jsonify({'status': 'sent', 'channel': 'smtp'})
+            else:
+                # Webhook test — find matching webhook by name or type
+                cfg = load_notification_config(flask_app.config['CONFIG_FILE'])
+                webhooks = cfg.get('webhooks', [])
+                target_wh = None
+                for wh in webhooks:
+                    if wh.get('name') == channel or wh.get('type') == channel:
+                        target_wh = wh
+                        break
+                if not target_wh or not target_wh.get('url'):
+                    return jsonify({'error': f'Webhook "{channel}" not found or has no URL'}), 400
+                from sale_monitor.services.webhooks import DiscordWebhookNotifier, SlackWebhookNotifier
+                wh_type = target_wh.get('type', '').lower()
+                if wh_type == 'discord':
+                    notifier = DiscordWebhookNotifier(name=channel, url=target_wh['url'])
+                elif wh_type == 'slack':
+                    notifier = SlackWebhookNotifier(name=channel, url=target_wh['url'])
+                else:
+                    return jsonify({'error': f'Unknown webhook type: {wh_type}'}), 400
+                ok = notifier.send_test()
+                if ok:
+                    return jsonify({'status': 'sent', 'channel': channel})
+                return jsonify({'error': f'Webhook "{channel}" failed to send'}), 502
+        except Exception as e:
+            logger.error("Test notification failed: %s", e, exc_info=True)
+            return _safe_error(e)
 
     # ---------------- Product Image Endpoint (added) -----------------
     # Simple in-memory image cache: {url: {image_url: str, fetched: datetime}}
@@ -1837,6 +2111,13 @@ def create_app():
     return flask_app
 
 
+CSV_COLUMNS = [
+    'name', 'url', 'target_price', 'discount_threshold', 'selector',
+    'enabled', 'notification_cooldown_hours', 'selector_source', 'currency',
+    'group', 'tags', 'alert_rules', 'notification_channels',
+]
+
+
 def _write_products_csv(filepath, products):
     """Helper to write products to CSV file."""
     lock = FileLock(filepath)
@@ -1844,7 +2125,7 @@ def _write_products_csv(filepath, products):
     try:
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['name', 'url', 'target_price', 'discount_threshold', 'selector', 'enabled', 'notification_cooldown_hours', 'selector_source', 'currency', 'group'])
+            writer.writerow(CSV_COLUMNS)
             for p in products:
                 writer.writerow([
                     p.name,
@@ -1856,7 +2137,10 @@ def _write_products_csv(filepath, products):
                     p.notification_cooldown_hours,
                     p.selector_source if p.selector_source else '',
                     p.currency if hasattr(p, 'currency') else 'CAD',
-                    p.group if getattr(p, 'group', None) else ''
+                    p.group if getattr(p, 'group', None) else '',
+                    ','.join(getattr(p, 'tags', []) or []),
+                    ','.join(getattr(p, 'alert_rules', []) or []),
+                    ','.join(getattr(p, 'notification_channels', []) or []),
                 ])
     finally:
         lock.release()

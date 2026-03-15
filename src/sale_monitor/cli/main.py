@@ -119,20 +119,40 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
         should_notify = False
         triggered_by = None
 
-        # Target price trigger
-        if p.target_price is not None and price <= p.target_price:
-            should_notify = True
-            triggered_by = "target_price"
+        # Determine which rules to evaluate
+        rules = p.alert_rules if p.alert_rules else ['target', 'discount']
 
-        # Discount threshold trigger (requires a prior price)
-        if not should_notify and p.discount_threshold is not None and old_price is not None:
-            try:
-                threshold_price = float(old_price) * (1 - float(p.discount_threshold) / 100.0)
-                if price <= threshold_price:
-                    should_notify = True
-                    triggered_by = f"discount_{p.discount_threshold:.0f}%"
-            except Exception:
-                pass
+        for rule in rules:
+            if should_notify:
+                break
+            if rule == 'target' and p.target_price is not None and price <= p.target_price:
+                should_notify = True
+                triggered_by = "target_price"
+            elif rule == 'discount' and p.discount_threshold is not None and old_price is not None:
+                try:
+                    threshold_price = float(old_price) * (1 - float(p.discount_threshold) / 100.0)
+                    if price <= threshold_price:
+                        should_notify = True
+                        triggered_by = f"discount_{p.discount_threshold:.0f}%"
+                except Exception:
+                    pass
+            elif rule == 'any_change' and old_price is not None and price != old_price:
+                should_notify = True
+                triggered_by = "any_change"
+            elif rule == 'price_drop' and old_price is not None and price < old_price:
+                should_notify = True
+                triggered_by = "price_drop"
+            elif rule == 'below_avg' and history is not None:
+                try:
+                    records = history.get_history(p.url, days=30)
+                    prices_hist = [r[1] for r in records if r[1] is not None]
+                    if prices_hist:
+                        avg = sum(prices_hist) / len(prices_hist)
+                        if price < avg:
+                            should_notify = True
+                            triggered_by = "below_avg"
+                except Exception:
+                    pass
 
         # Cooldown and de-dup checks
         if should_notify and smtp_cfg.enable:

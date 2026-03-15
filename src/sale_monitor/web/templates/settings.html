@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-0">
+    <h1 class="text-2xl font-semibold text-white">Settings</h1>
+    <p class="mt-1 text-sm text-gray-400">Configure notifications, webhooks, and default alert channels.</p>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-stack" aria-live="polite" aria-atomic="true" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2 max-w-md w-full px-4"></div>
+
+<!-- SMTP Settings -->
+<div class="mt-8 px-4 sm:px-0">
+    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg font-medium text-white mb-4">Email (SMTP) Notifications</h3>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">SMTP Server</label>
+                    <input type="text" id="smtp-server" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" placeholder="smtp.gmail.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">Port</label>
+                    <input type="number" id="smtp-port" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" value="587">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">Username</label>
+                    <input type="text" id="smtp-username" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" placeholder="user@example.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">Password</label>
+                    <input type="password" id="smtp-password" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" placeholder="App password or SMTP password">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">From Email</label>
+                    <input type="email" id="smtp-from" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" placeholder="alerts@example.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">To Email</label>
+                    <input type="email" id="smtp-to" class="mt-1 block w-full rounded-md bg-gray-900 border-gray-600 text-white px-3 py-2 border text-sm" placeholder="you@example.com">
+                </div>
+            </div>
+            <div class="mt-4 flex items-center gap-6">
+                <label class="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input type="checkbox" id="smtp-enabled" class="rounded bg-gray-900 border-gray-600 text-primary-600 focus:ring-primary-500">
+                    Enabled
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input type="checkbox" id="smtp-starttls" checked class="rounded bg-gray-900 border-gray-600 text-primary-600 focus:ring-primary-500">
+                    Use STARTTLS
+                </label>
+            </div>
+            <div class="mt-4">
+                <button type="button" class="inline-flex items-center px-3 py-2 border border-gray-600 rounded-md text-sm text-gray-300 bg-gray-700 hover:bg-gray-600" onclick="testChannel('smtp')">
+                    Send Test Email
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Webhooks -->
+<div class="mt-6 px-4 sm:px-0">
+    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-medium text-white">Webhook Channels</h3>
+                <button type="button" class="inline-flex items-center px-3 py-2 border border-primary-600 rounded-md text-sm text-primary-400 bg-gray-900 hover:bg-gray-700" onclick="addWebhook()">
+                    + Add Webhook
+                </button>
+            </div>
+            <div id="webhooks-list" class="space-y-4">
+                <!-- Webhook entries rendered here -->
+            </div>
+            <p id="no-webhooks" class="text-gray-400 text-sm" style="display:none;">No webhooks configured. Click "Add Webhook" to set one up.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Default Channels -->
+<div class="mt-6 px-4 sm:px-0">
+    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg font-medium text-white mb-2">Default Notification Channels</h3>
+            <p class="text-sm text-gray-400 mb-4">Products without explicit channel overrides will notify through these channels.</p>
+            <div id="default-channels" class="flex flex-wrap gap-4">
+                <!-- Checkboxes rendered dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Save Button -->
+<div class="mt-6 px-4 sm:px-0 flex justify-end gap-3 mb-8">
+    <button type="button" id="save-settings-btn" class="inline-flex items-center px-6 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500" onclick="saveSettings()">
+        Save Settings
+    </button>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentConfig = {};
+
+function escapeHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function pushToast(type, message) {
+    const stack = document.getElementById('toast-stack');
+    if (!stack) return;
+    const id = 'toast-' + Date.now();
+    const div = document.createElement('div');
+    div.className = 'sm-toast sm-toast-' + (type === 'error' ? 'error' : 'success');
+    div.id = id;
+    div.innerHTML = '<div style="flex:1;"><strong>' + (type === 'error' ? 'Error' : 'Success') + '</strong><br>' + escapeHtml(message) + '</div><button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:1.2em;">&times;</button>';
+    stack.appendChild(div);
+    setTimeout(() => { const el = document.getElementById(id); if (el) el.remove(); }, type === 'error' ? 6000 : 4000);
+}
+
+function loadSettings() {
+    fetch('/api/settings/notifications')
+        .then(r => r.ok ? r.json() : Promise.reject('Failed to load'))
+        .then(data => {
+            currentConfig = data;
+            populateForm(data);
+        })
+        .catch(err => pushToast('error', String(err)));
+}
+
+function populateForm(cfg) {
+    const smtp = cfg.smtp || {};
+    document.getElementById('smtp-server').value = smtp.server || '';
+    document.getElementById('smtp-port').value = smtp.port || 587;
+    document.getElementById('smtp-username').value = smtp.username || '';
+    document.getElementById('smtp-password').value = smtp.password || '';
+    document.getElementById('smtp-from').value = smtp.from_email || '';
+    document.getElementById('smtp-to').value = smtp.to_email || '';
+    document.getElementById('smtp-enabled').checked = !!smtp.enabled;
+    document.getElementById('smtp-starttls').checked = smtp.use_starttls !== false;
+
+    renderWebhooks(cfg.webhooks || []);
+    renderDefaultChannels(cfg);
+}
+
+function renderWebhooks(webhooks) {
+    const list = document.getElementById('webhooks-list');
+    const empty = document.getElementById('no-webhooks');
+    if (!webhooks.length) {
+        list.innerHTML = '';
+        empty.style.display = '';
+        return;
+    }
+    empty.style.display = 'none';
+    list.innerHTML = webhooks.map((wh, i) => `
+        <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-end p-3 rounded-md border border-gray-700 bg-gray-900" data-wh-index="${i}">
+            <div class="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-3 w-full">
+                <div>
+                    <label class="block text-xs text-gray-400">Name</label>
+                    <input type="text" class="wh-name mt-1 block w-full rounded-md bg-gray-800 border-gray-600 text-white px-2 py-1.5 border text-sm" value="${escapeHtml(wh.name || '')}">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400">Type</label>
+                    <select class="wh-type mt-1 block w-full rounded-md bg-gray-800 border-gray-600 text-white px-2 py-1.5 border text-sm">
+                        <option value="discord"${wh.type === 'discord' ? ' selected' : ''}>Discord</option>
+                        <option value="slack"${wh.type === 'slack' ? ' selected' : ''}>Slack</option>
+                    </select>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-xs text-gray-400">Webhook URL</label>
+                    <input type="url" class="wh-url mt-1 block w-full rounded-md bg-gray-800 border-gray-600 text-white px-2 py-1.5 border text-sm" value="${escapeHtml(wh.url || '')}" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <label class="inline-flex items-center gap-1 text-xs text-gray-300">
+                    <input type="checkbox" class="wh-enabled rounded bg-gray-800 border-gray-600 text-primary-600" ${wh.enabled ? 'checked' : ''}>
+                    On
+                </label>
+                <button type="button" class="px-2 py-1 text-xs rounded border border-gray-600 text-gray-300 hover:bg-gray-700" onclick="testChannel('${escapeHtml(wh.name || wh.type)}')">Test</button>
+                <button type="button" class="px-2 py-1 text-xs rounded border border-red-600 text-red-400 hover:bg-gray-700" onclick="removeWebhook(${i})">Remove</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addWebhook() {
+    const webhooks = collectWebhooks();
+    webhooks.push({name: '', type: 'discord', url: '', enabled: false});
+    renderWebhooks(webhooks);
+    renderDefaultChannels(null);
+}
+
+function removeWebhook(index) {
+    const webhooks = collectWebhooks();
+    webhooks.splice(index, 1);
+    renderWebhooks(webhooks);
+    renderDefaultChannels(null);
+}
+
+function collectWebhooks() {
+    const entries = document.querySelectorAll('#webhooks-list [data-wh-index]');
+    return Array.from(entries).map(el => ({
+        name: el.querySelector('.wh-name').value.trim(),
+        type: el.querySelector('.wh-type').value,
+        url: el.querySelector('.wh-url').value.trim(),
+        enabled: el.querySelector('.wh-enabled').checked,
+    }));
+}
+
+function collectFormData() {
+    const webhooks = collectWebhooks();
+    const defaultChannels = [];
+    document.querySelectorAll('#default-channels input[type="checkbox"]:checked').forEach(cb => {
+        defaultChannels.push(cb.value);
+    });
+    return {
+        smtp: {
+            server: document.getElementById('smtp-server').value.trim(),
+            port: parseInt(document.getElementById('smtp-port').value) || 587,
+            username: document.getElementById('smtp-username').value.trim(),
+            password: document.getElementById('smtp-password').value,
+            from_email: document.getElementById('smtp-from').value.trim(),
+            to_email: document.getElementById('smtp-to').value.trim(),
+            enabled: document.getElementById('smtp-enabled').checked,
+            use_starttls: document.getElementById('smtp-starttls').checked,
+        },
+        webhooks: webhooks,
+        default_channels: defaultChannels,
+    };
+}
+
+function renderDefaultChannels(cfg) {
+    const container = document.getElementById('default-channels');
+    const webhooks = cfg ? (cfg.webhooks || []) : collectWebhooks();
+    const defaults = cfg ? (cfg.default_channels || []) : [];
+
+    const channels = [{id: 'smtp', label: 'Email (SMTP)'}];
+    webhooks.forEach(wh => {
+        if (wh.name) channels.push({id: wh.name, label: wh.name + ' (' + wh.type + ')'});
+    });
+
+    container.innerHTML = channels.map(ch => `
+        <label class="inline-flex items-center gap-2 text-sm text-gray-300">
+            <input type="checkbox" value="${escapeHtml(ch.id)}" class="rounded bg-gray-900 border-gray-600 text-primary-600 focus:ring-primary-500" ${defaults.includes(ch.id) ? 'checked' : ''}>
+            ${escapeHtml(ch.label)}
+        </label>
+    `).join('');
+}
+
+function saveSettings() {
+    const data = collectFormData();
+    const btn = document.getElementById('save-settings-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    fetch('/api/settings/notifications', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, data: j})))
+    .then(({ok, data}) => {
+        if (!ok || data.error) {
+            pushToast('error', data.error || 'Save failed');
+        } else {
+            pushToast('success', 'Settings saved');
+            loadSettings();
+        }
+    })
+    .catch(err => pushToast('error', String(err)))
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Save Settings';
+    });
+}
+
+function testChannel(channel) {
+    pushToast('success', 'Sending test to ' + channel + '...');
+    fetch('/api/settings/notifications/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({channel: channel}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, data: j})))
+    .then(({ok, data}) => {
+        if (!ok || data.error) {
+            pushToast('error', data.error || 'Test failed');
+        } else {
+            pushToast('success', 'Test sent to ' + channel);
+        }
+    })
+    .catch(err => pushToast('error', String(err)));
+}
+
+document.addEventListener('DOMContentLoaded', loadSettings);
+</script>
+<style>
+.sm-toast {
+    pointer-events: auto;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+    font-size: 0.875rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+.sm-toast-success { background-color: #10b981; color: white; }
+.sm-toast-error { background-color: #ef4444; color: white; }
+</style>
+{% endblock %}
