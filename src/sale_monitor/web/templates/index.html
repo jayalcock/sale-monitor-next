@@ -83,32 +83,7 @@
     </div>
 </div>
 
-<!-- Competitive Groups -->
-<div id="groups-section" class="mt-8 px-4 sm:px-0" style="display:none;">
-    <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
-        <div class="px-4 py-5 sm:p-6">
-            <div class="sm:flex sm:items-center sm:justify-between">
-                <h3 class="text-lg leading-6 font-medium text-white">Competitive Groups</h3>
-                <a href="/compare" class="text-primary-400 hover:text-primary-300 text-sm">View all &rarr;</a>
-            </div>
-            <div id="groups-error" class="mt-3 rounded-md bg-red-900/40 border border-red-700 p-3 text-sm text-red-200" role="alert" style="display:none;">
-                Unable to load competitive groups.
-            </div>
-            <div id="groups-empty" class="mt-3 text-sm text-gray-400" style="display:none;">
-                No competitive groups yet. Add a <strong>group</strong> slug to products on the <a href="/manage" class="text-primary-400 hover:text-primary-300 underline">Manage</a> page.
-            </div>
-            <div id="groups-list" class="mt-4 space-y-3"></div>
-        </div>
-    </div>
-    <style>
-    .group-card { border-radius: 0.5rem; overflow: hidden; transition: border-color 0.15s; }
-    .group-card:hover { border-color: #6366f1; }
-    .vendor-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; }
-    .vendor-bar:not(:last-child) { border-bottom: 1px solid #1f2937; }
-    .vendor-bar.is-lowest { background: rgba(16, 185, 129, 0.08); }
-    .savings-badge { background: #065f46; color: #6ee7b7; font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
-    </style>
-</div>
+
 
 
 
@@ -320,9 +295,6 @@ let CURRENT_BASE_CURRENCY = 'CAD';
 let sortBy = 'name';
 let sortDesc = false;
 let currentView = localStorage.getItem('productView') || 'table';
-// Competitive groups settings
-const GROUPS_LIMIT = 5; // show top N groups
-const GROUPS_SORT = 'spread'; // spread | lowest | count
 // Groups lookup for table rendering
 let GROUPS = [];
 let URL_TO_GROUP = {}; // url -> group_key
@@ -1142,108 +1114,13 @@ function computeGroupMetrics(group) {
     return { count, lowest, highest, spread, pricedCount: priced.length };
 }
 
-function renderGroupRow(group) {
-    const m = computeGroupMetrics(group);
-    const title = (group.items && group.items[0] && group.items[0].name) ? group.items[0].name : group.group_key || 'Group';
-    const sourceBadge = group.source === 'csv'
-        ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-900/60 text-indigo-300 border border-indigo-700">CSV</span>'
-        : group.source === 'manual'
-        ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700">Manual</span>'
-        : '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-700 text-gray-300 border border-gray-600">Auto</span>';
-
-    // Build vendor bars
-    let vendorsHtml = '';
-    if (m.pricedCount > 0) {
-        const items = (group.items || []).map(it => ({...it, _pb: (it.price_in_base != null ? Number(it.price_in_base) : NaN)}));
-        const priced = items.filter(it => !isNaN(it._pb)).sort((a,b) => a._pb - b._pb);
-        const lowestPb = priced.length > 0 ? priced[0]._pb : null;
-
-        vendorsHtml = priced.slice(0, 5).map((it, idx) => {
-            const merchant = getMerchant(it);
-            const isLowest = idx === 0;
-            const priceStr = `$${it._pb.toFixed(2)} ${CURRENT_BASE_CURRENCY || 'CAD'}`;
-            const nativeStr = (it.currency && it.currency !== (CURRENT_BASE_CURRENCY || 'CAD') && it.current_price != null)
-                ? `<span class="text-gray-500 text-xs ml-1">(${it.currency} $${Number(it.current_price).toFixed(2)})</span>` : '';
-            const savingsHtml = (!isLowest && lowestPb != null && it._pb > lowestPb)
-                ? `<span class="savings-badge">+$${(it._pb - lowestPb).toFixed(2)}</span>` : '';
-            const lowestMark = isLowest ? '<span class="savings-badge" style="background:#064e3b;">Lowest</span>' : '';
-            return `
-                <div class="vendor-bar ${isLowest ? 'is-lowest' : ''}">
-                    <a href="${it.url}" target="_blank" class="text-sm ${isLowest ? 'text-emerald-300 font-semibold' : 'text-gray-300'} hover:text-primary-300 truncate flex-shrink-0" style="min-width:100px;">${merchant}</a>
-                    <span class="text-sm text-white font-medium whitespace-nowrap">${priceStr}</span>${nativeStr}
-                    ${lowestMark}${savingsHtml}
-                    <span class="flex-1"></span>
-                    <a href="/product/detail?url=${encodeURIComponent(it.url)}" class="text-xs text-gray-500 hover:text-primary-400">History</a>
-                </div>`;
-        }).join('');
-
-        if (priced.length > 5) {
-            vendorsHtml += `<div class="vendor-bar text-xs text-gray-500">+ ${priced.length - 5} more vendor(s)</div>`;
-        }
-    } else {
-        vendorsHtml = '<div class="vendor-bar text-gray-500 text-sm">No prices available yet</div>';
-    }
-
-    // Summary line
-    const countStr = `${m.count} vendor${m.count !== 1 ? 's' : ''}`;
-    const spreadStr = (m.spread != null && m.spread > 0) ? ` · $${m.spread.toFixed(2)} spread` : '';
-
-    return `
-        <div class="group-card bg-gray-900 border border-gray-700">
-            <div class="flex items-center justify-between px-3 py-2.5 bg-gray-900 border-b border-gray-700">
-                <div class="flex items-center gap-2 min-w-0">
-                    <span class="text-white font-medium text-sm truncate">${escapeHtml(String(title))}</span>
-                    ${sourceBadge}
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0 text-xs text-gray-400">
-                    <span>${countStr}${spreadStr}</span>
-                    <a href="/compare" class="text-primary-400 hover:text-primary-300">Compare</a>
-                </div>
-            </div>
-            <div>${vendorsHtml}</div>
-        </div>
-    `;
-}
-
-function renderCompetitiveGroups(groups) {
-    const section = document.getElementById('groups-section');
-    const list = document.getElementById('groups-list');
-    const errEl = document.getElementById('groups-error');
-    const emptyEl = document.getElementById('groups-empty');
-    if (!section || !list) return;
-    errEl.style.display = 'none';
-    emptyEl.style.display = 'none';
-
+function buildGroupLookups(groups) {
     if (!Array.isArray(groups) || groups.length === 0) {
-        section.style.display = 'block';
-        emptyEl.style.display = 'block';
-        list.innerHTML = '';
-        // Initialize empty lookups
         GROUPS = [];
         URL_TO_GROUP = {};
         GROUP_PRIMARY_URL = {};
         return;
     }
-
-    // Sort groups
-    const augmented = groups.map(g => ({ g, m: computeGroupMetrics(g) }));
-    augmented.sort((a,b) => {
-        if (GROUPS_SORT === 'lowest') {
-            const av = a.m.lowest ? a.m.lowest._pb : Infinity;
-            const bv = b.m.lowest ? b.m.lowest._pb : Infinity;
-            return av - bv;
-        } else if (GROUPS_SORT === 'count') {
-            return (b.m.count || 0) - (a.m.count || 0);
-        }
-        // default: spread desc
-        return (b.m.spread || 0) - (a.m.spread || 0);
-    });
-
-    const top = augmented.slice(0, GROUPS_LIMIT).map(x => x.g);
-    list.innerHTML = top.map(renderGroupRow).join('');
-    section.style.display = 'block';
-
-    // Build lookups for table rendering
     GROUPS = groups;
     URL_TO_GROUP = {};
     GROUP_PRIMARY_URL = {};
@@ -1258,8 +1135,6 @@ function renderCompetitiveGroups(groups) {
 }
 
 function loadGroups() {
-    const errEl = document.getElementById('groups-error');
-    if (errEl) errEl.style.display = 'none';
     return fetch('/api/compare/groups')
         .then(r => {
             if (!r.ok) throw new Error('Failed to fetch groups');
@@ -1267,16 +1142,11 @@ function loadGroups() {
         })
         .then(data => {
             const groups = Array.isArray(data) ? data : (data.items || []);
-            renderCompetitiveGroups(groups);
+            buildGroupLookups(groups);
         })
         .catch(err => {
-            const section = document.getElementById('groups-section');
-            if (section) section.style.display = 'none';
-            if (errEl) errEl.style.display = 'block';
-            // Initialize empty lookups on error so products can still render
-            GROUPS = [];
-            URL_TO_GROUP = {};
-            GROUP_PRIMARY_URL = {};
+            console.error('Failed to load groups:', err);
+            buildGroupLookups([]);
         });
 }
 
