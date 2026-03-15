@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pytest
-from sale_monitor.storage.json_state import load_state, save_state
+from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
 
 
 def test_load_state_missing_file():
@@ -95,3 +95,47 @@ def test_save_state_json_formatting(tmp_path):
     
     # Verify keys are sorted (a_key should appear before z_key)
     assert content.index("a_key") < content.index("z_key")
+
+
+# ---- Pruning tests ----
+
+def test_prune_removes_stale_entries(tmp_path):
+    file_path = tmp_path / "state.json"
+    state = {
+        "https://keep.com/1": {"current_price": 10},
+        "https://stale.com/2": {"current_price": 20},
+        "https://keep.com/3": {"current_price": 30},
+    }
+    save_state(str(file_path), state)
+
+    removed = prune_stale_entries(
+        str(file_path),
+        active_urls={"https://keep.com/1", "https://keep.com/3"},
+    )
+    assert removed == 1
+
+    after = load_state(str(file_path))
+    assert "https://stale.com/2" not in after
+    assert "https://keep.com/1" in after
+    assert "https://keep.com/3" in after
+
+
+def test_prune_caps_identifiers(tmp_path):
+    file_path = tmp_path / "state.json"
+    big_ids = {f"key_{i}": f"val_{i}" for i in range(60)}
+    state = {"https://a.com": {"identifiers": big_ids}}
+    save_state(str(file_path), state)
+
+    prune_stale_entries(str(file_path), active_urls={"https://a.com"}, max_identifiers=50)
+
+    after = load_state(str(file_path))
+    assert len(after["https://a.com"]["identifiers"]) == 50
+
+
+def test_prune_no_stale_entries(tmp_path):
+    file_path = tmp_path / "state.json"
+    state = {"https://a.com": {"current_price": 5}}
+    save_state(str(file_path), state)
+
+    removed = prune_stale_entries(str(file_path), active_urls={"https://a.com"})
+    assert removed == 0

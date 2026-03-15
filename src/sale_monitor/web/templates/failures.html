@@ -71,17 +71,6 @@
 
 {% block extra_scripts %}
 <script>
-function formatDate(dateStr) {
-    if (!dateStr) return 'Never';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
-}
-
-function formatPrice(price) {
-    if (price === null || price === undefined) return 'N/A';
-    return `$${parseFloat(price).toFixed(2)}`;
-}
-
 function getFailureRateBadge(rate) {
     if (rate >= 75) {
         return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-600 text-red-50">${rate.toFixed(1)}%</span>`;
@@ -182,7 +171,8 @@ function loadFailures() {
             if (!response.ok) throw new Error('Failed to fetch failures');
             return response.json();
         })
-        .then(failures => {
+        .then(data => {
+            const failures = Array.isArray(data) ? data : (data.items || []);
             document.getElementById('loading').style.display = 'none';
             document.getElementById('failures-container').style.display = 'block';
             

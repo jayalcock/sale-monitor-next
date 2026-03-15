@@ -141,6 +141,10 @@ class PriceHistory:
 
             conn.commit()
 
+        # Run schema migrations (versioned, idempotent)
+        from sale_monitor.storage.migrations import run_migrations
+        run_migrations(self.db_path)
+
     def record_price(
         self, 
         product_url: str, 

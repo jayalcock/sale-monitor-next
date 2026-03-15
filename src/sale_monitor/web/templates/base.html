@@ -175,6 +175,26 @@
         
         // Auto-refresh every 60 seconds
         setInterval(updateAlertsBadge, 60000);
+        
+        // Shared utility functions
+        function formatPrice(price) {
+            if (price === null || price === undefined) return 'N/A';
+            return `$${parseFloat(price).toFixed(2)}`;
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Never';
+            const date = new Date(dateStr);
+            return date.toLocaleString();
+        }
+        
+        function isMobile() {
+            return window.innerWidth <= 576;
+        }
+        
+        function fontSizeForDevice() {
+            return { size: isMobile() ? 12 : 14 };
+        }
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

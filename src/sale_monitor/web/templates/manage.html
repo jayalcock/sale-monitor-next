@@ -283,7 +283,8 @@ function escapeHtml(text) {
 function loadProducts() {
     fetch('/api/products')
         .then(response => response.json())
-        .then(products => {
+        .then(data => {
+            const products = Array.isArray(data) ? data : (data.items || []);
             productsData = products;
             document.getElementById('loading').style.display = 'none';
             document.getElementById('products-table').style.display = 'block';

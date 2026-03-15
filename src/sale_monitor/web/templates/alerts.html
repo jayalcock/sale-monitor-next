@@ -36,16 +36,6 @@
 
 {% block extra_scripts %}
 <script>
-function formatPrice(price) {
-    return `$${parseFloat(price).toFixed(2)}`;
-}
-
-function formatDate(dateStr) {
-    if (!dateStr) return 'Never';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
-}
-
 function renderAlert(alert) {
     const isTarget = alert.alert_type === 'target_met';
     const isDiscount = alert.alert_type === 'discount_met';

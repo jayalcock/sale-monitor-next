@@ -687,8 +687,8 @@ function loadProducts() {
         fetch('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
         fetch('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts'))
     ])
-    .then(([products, alerts]) => {
-        allProducts = products;
+    .then(([productsResp, alerts]) => {
+        allProducts = Array.isArray(productsResp) ? productsResp : (productsResp.items || []);
         
         // Build alert lookup map
         productAlerts = {};
@@ -699,8 +699,8 @@ function loadProducts() {
         }
         
         // Capture base currency from API (same for all products)
-        if (products && products.length) {
-            CURRENT_BASE_CURRENCY = (products[0].base_currency || 'CAD');
+        if (allProducts && allProducts.length) {
+            CURRENT_BASE_CURRENCY = (allProducts[0].base_currency || 'CAD');
             // Update trend mode labels to reflect current base currency
             const absOpt = document.querySelector('#trend-mode option[value="absolute"]');
             const logOpt = document.querySelector('#trend-mode option[value="log"]');
@@ -712,7 +712,7 @@ function loadProducts() {
         }
         document.getElementById('loading').style.display = 'none';
         renderProducts();
-        updateLastUpdate(products);
+        updateLastUpdate(allProducts);
     })
     .catch(error => {
         document.getElementById('loading').style.display = 'none';
@@ -746,7 +746,8 @@ function loadTrends() {
             }
             return response.json();
         })
-        .then(seriesList => {
+        .then(data => {
+            const seriesList = Array.isArray(data) ? data : (data.items || []);
             if (trendsChart) { trendsChart.destroy(); trendsChart = null; }
 
             if (!seriesList || seriesList.length === 0) {
@@ -1193,7 +1194,8 @@ function loadGroups() {
             if (!r.ok) throw new Error('Failed to fetch groups');
             return r.json();
         })
-        .then(groups => {
+        .then(data => {
+            const groups = Array.isArray(data) ? data : (data.items || []);
             renderCompetitiveGroups(groups);
         })
         .catch(err => {

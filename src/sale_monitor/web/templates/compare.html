@@ -26,7 +26,8 @@
         showError('Server error: ' + txt.slice(0,200));
         return;
       }
-      const groups = await res.json();
+      const data = await res.json();
+      const groups = Array.isArray(data) ? data : (data.items || []);
       if (groups && groups.error) {
         showError('Group build failed: ' + (groups.details || groups.error));
         return;
@@ -36,11 +37,6 @@
     } catch (e) {
       showError('Fetch failed: ' + e);
     }
-  }
-
-  function fmtPrice(p) {
-    if (p === null || p === undefined) return '-';
-    try { return `$${Number(p).toFixed(2)}`; } catch { return String(p); }
   }
 
   function renderGroups(groups) {
@@ -54,7 +50,7 @@
       const items = g.items.map((it, idx) => {
         const isLowest = idx === 0 && it.price_in_base !== null && it.price_in_base !== undefined;
         return `
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 ${isLowest ? 'bg-gray-700' : 'bg-gray-800'}">\n          <div class="flex-1">\n            <a class="text-primary-300 hover:text-primary-200 font-medium" href="${it.url}" target="_blank" rel="noopener">${it.name}</a>\n            <div class="text-xs text-gray-300 mt-1">${it.currency} ${fmtPrice(it.current_price)} <span class="text-gray-500">|</span> Base: ${fmtPrice(it.price_in_base)}</div>\n          </div>\n        </div>`;
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 ${isLowest ? 'bg-gray-700' : 'bg-gray-800'}">\n          <div class="flex-1">\n            <a class="text-primary-300 hover:text-primary-200 font-medium" href="${it.url}" target="_blank" rel="noopener">${it.name}</a>\n            <div class="text-xs text-gray-300 mt-1">${it.currency} ${formatPrice(it.current_price)} <span class="text-gray-500">|</span> Base: ${formatPrice(it.price_in_base)}</div>\n          </div>\n        </div>`;
       }).join('');
 
       const id = g.identifiers || {};
@@ -92,7 +88,8 @@ async function fetchSuggestions() {
   try {
     const res = await fetch('/api/compare/suggest');
     if (!res.ok) return;
-    const sugg = await res.json();
+    const data = await res.json();
+    const sugg = Array.isArray(data) ? data : (data.items || []);
     const box = document.getElementById('suggestionsContainer');
     if (!Array.isArray(sugg) || sugg.length === 0) {
       box.innerHTML = '<div class="text-gray-400">No suggestions yet.</div>';

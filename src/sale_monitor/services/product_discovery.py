@@ -208,15 +208,19 @@ class ProductDiscovery:
         except:
             pass
         
-        # Search all configured retailers
+        # Search all configured retailers in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         all_results = []
-        for retailer_domain in self.RETAILERS.keys():
-            # Optionally skip current retailer
-            # (commented out to allow finding different products at same retailer)
-            # if current_domain and retailer_domain in current_domain:
-            #     continue
-            
-            results = self.search_retailer(retailer_domain, query, existing_urls)
-            all_results.extend(results)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(self.search_retailer, domain, query, existing_urls): domain
+                for domain in self.RETAILERS
+            }
+            for future in as_completed(futures):
+                try:
+                    all_results.extend(future.result())
+                except Exception as e:
+                    logging.warning("Discovery thread error for %s: %s", futures[future], e)
         
         return all_results

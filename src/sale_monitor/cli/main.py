@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.storage.csv_products import read_products
-from sale_monitor.storage.json_state import load_state, save_state
+from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.services.notifications import NotificationManager, SmtpConfig
 
@@ -26,15 +26,34 @@ def _str_to_bool(v: str, default: bool = False) -> bool:
 
 def check_prices(args, smtp_cfg, notifier, extractor, history=None):
     """Check prices for all products - extracted for scheduling."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     products = read_products(args.products_csv)
     state = load_state(args.state_file)
 
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products from {args.products_csv}")
 
+    # Phase 1: Extract prices in parallel (I/O bound)
+    max_workers = min(4, len(enabled)) if enabled else 1
+
+    def _extract(p):
+        return p, extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
+
+    extraction_results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_product = {pool.submit(_extract, p): p for p in enabled}
+        for future in as_completed(future_to_product):
+            try:
+                extraction_results.append(future.result())
+            except Exception as e:
+                p = future_to_product[future]
+                logging.error(f"{p.name}: extraction thread error: {e}")
+                extraction_results.append((p, (None, None, None)))
+
+    # Phase 2: Process results sequentially (state updates, notifications)
     updated = 0
-    for p in enabled:
-        price, selector_source, detected_currency = extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
+    for p, (price, selector_source, detected_currency) in extraction_results:
         if price is None:
             logging.warning(f"{p.name}: price not found")
             # Record failure in history for alerts tracking
@@ -178,7 +197,9 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
         state[key] = rec
         updated += 1
 
-    save_state(args.state_file, state)
+        # Incremental save: persist state after each product to avoid partial loss on crash
+        save_state(args.state_file, state)
+
     logging.info(f"Updated {updated} products. State saved to {args.state_file}.")
     return updated
 
@@ -213,8 +234,8 @@ def main() -> int:
     
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
-                        format="%(asctime)s - %(levelname)s - %(message)s")
+    from sale_monitor.logging_config import setup_logging
+    setup_logging(level=args.log_level)
 
     # Initialize history
     history = PriceHistory(args.history_db)
@@ -304,6 +325,13 @@ def main() -> int:
         deleted = history.cleanup_old_records(args.history_retention_days)
         if deleted:
             logging.info(f"Cleaned up {deleted} old history records (retention: {args.history_retention_days} days)")
+
+    # Prune stale state entries (URLs no longer in products CSV)
+    products_for_prune = read_products(args.products_csv)
+    active_urls = {p.url for p in products_for_prune}
+    pruned = prune_stale_entries(args.state_file, active_urls)
+    if pruned:
+        logging.info(f"Pruned {pruned} stale state entries")
 
     # One-time run or scheduled?
     if not args.every:

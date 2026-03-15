@@ -2,6 +2,9 @@ from typing import List, Dict
 import json
 import os
 
+from sale_monitor.storage.file_lock import FileLock
+
+
 class JSONStore:
     """Handles storage of product data in JSON format."""
     
@@ -17,10 +20,20 @@ class JSONStore:
 
     def load_products(self) -> List[Dict]:
         """Load product data from the JSON file."""
-        with open(self.file_path, 'r') as f:
-            return json.load(f)
+        lock = FileLock(self.file_path)
+        try:
+            lock.acquire()
+            with open(self.file_path, 'r') as f:
+                return json.load(f)
+        finally:
+            lock.release()
 
     def save_products(self, products: List[Dict]):
         """Save product data to the JSON file."""
-        with open(self.file_path, 'w') as f:
-            json.dump(products, f, indent=2)
+        lock = FileLock(self.file_path)
+        try:
+            lock.acquire()
+            with open(self.file_path, 'w') as f:
+                json.dump(products, f, indent=2)
+        finally:
+            lock.release()

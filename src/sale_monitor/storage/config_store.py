@@ -15,6 +15,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Dict, Any
 
+from sale_monitor.storage.file_lock import FileLock
+
 DEFAULTS: Dict[str, Any] = {
     "base_currency": "CAD",
 }
@@ -24,10 +26,14 @@ def load_config(path: str) -> Dict[str, Any]:
     p = Path(path)
     if not p.exists():
         return DEFAULTS.copy()
+    lock = FileLock(path)
     try:
+        lock.acquire()
         data = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return DEFAULTS.copy()
+    finally:
+        lock.release()
     # Merge defaults for missing keys
     merged = DEFAULTS.copy()
     if isinstance(data, dict):
@@ -41,10 +47,15 @@ def save_config(path: str, data: Dict[str, Any]) -> None:
     merged = DEFAULTS.copy()
     if data:
         merged.update(data)
-    with NamedTemporaryFile("w", delete=False, dir=str(p.parent), encoding="utf-8") as tmp:
-        json.dump(merged, tmp, indent=2, sort_keys=True)
-        tmp.flush()
-    Path(tmp.name).replace(p)
+    lock = FileLock(path)
+    try:
+        lock.acquire()
+        with NamedTemporaryFile("w", delete=False, dir=str(p.parent), encoding="utf-8") as tmp:
+            json.dump(merged, tmp, indent=2, sort_keys=True)
+            tmp.flush()
+        Path(tmp.name).replace(p)
+    finally:
+        lock.release()
 
 
 def get_base_currency(path: str) -> str:

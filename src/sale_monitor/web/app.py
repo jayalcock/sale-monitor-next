@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 import os
 import csv
 import sqlite3
+import time
 import requests
 import logging
+from urllib.parse import urlparse
 
 from sale_monitor.storage.csv_products import read_products
 from sale_monitor.storage.json_state import load_state, save_state
@@ -20,6 +22,9 @@ from sale_monitor.services.discovery_scheduler import DiscoveryScheduler
 from sale_monitor.domain.models import Product
 from sale_monitor.storage.file_lock import FileLock
 from sale_monitor.storage.config_store import load_config, save_config, get_base_currency
+from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
+
+logger = logging.getLogger(__name__)
 
 
 def create_app():
@@ -51,6 +56,63 @@ def create_app():
     # Start scheduler if enabled (disabled by default - can cause file lock contention)
     if os.getenv('ENABLE_AUTO_DISCOVERY', '0').lower() not in ('0', 'false', 'no'):
         flask_app.discovery_scheduler.start()
+
+    # --------------- Rate Limiting ---------------
+    try:
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+        limiter = Limiter(
+            get_remote_address,
+            app=flask_app,
+            default_limits=["60 per minute"],
+            storage_uri="memory://",
+        )
+    except ImportError:
+        limiter = None
+        logger.warning("flask-limiter not installed; rate limiting disabled")
+
+    # Conditional rate limit decorator (no-op when limiter unavailable)
+    def _rate_limit(limit_string):
+        def decorator(f):
+            if limiter is not None:
+                return limiter.limit(limit_string)(f)
+            return f
+        return decorator
+
+    # --------------- CSRF Protection ---------------
+    @flask_app.before_request
+    def _enforce_csrf_protection():
+        """Reject non-JSON POST/DELETE requests to /api/* (CSRF mitigation).
+
+        Requests with no body are exempt (no form data to forge).
+        """
+        if request.method in ('POST', 'PUT', 'DELETE', 'PATCH') and request.path.startswith('/api/'):
+            if request.content_length and request.content_length > 0:
+                ct = request.content_type or ''
+                if not ct.startswith('application/json'):
+                    return jsonify({'error': 'Content-Type must be application/json'}), 400
+
+    # --------------- Request Timing ---------------
+    @flask_app.before_request
+    def _start_timer():
+        request._start_time = time.time()
+
+    @flask_app.after_request
+    def _log_request_duration(response):
+        start = getattr(request, '_start_time', None)
+        if start is not None:
+            duration_ms = (time.time() - start) * 1000
+            logger.info(
+                "%s %s %s %.1fms",
+                request.method, request.path, response.status_code, duration_ms,
+            )
+        return response
+
+    # --------------- Error Sanitization Helper ---------------
+    def _safe_error(e, msg='Internal server error'):
+        """Log full exception server-side but return a generic message to clients."""
+        logger.error("%s: %s", msg, e, exc_info=True)
+        return jsonify({'error': msg}), 500
 
     def _build_comparison_groups(state: dict, products: list, base_currency: str) -> list:
         """Group products by shared identifiers (mpn/sku/gtin).
@@ -121,7 +183,19 @@ def create_app():
         """Return similarity ratio between two strings using SequenceMatcher."""
         from difflib import SequenceMatcher
         return SequenceMatcher(None, a, b).ratio()
-    
+
+    def _paginate(items: list) -> dict:
+        """Apply limit/offset pagination from query params. Returns envelope dict."""
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', 0, type=int)
+        total = len(items)
+        if limit is not None:
+            limit = max(1, min(limit, 200))
+            items = items[offset:offset + limit]
+        else:
+            limit = total
+        return {'items': items, 'total': total, 'limit': limit, 'offset': offset}
+
     @flask_app.route('/')
     def index():
         """Dashboard home page."""
@@ -153,6 +227,7 @@ def create_app():
         return render_template('failures.html')
     
     @flask_app.route('/api/products')
+    @require_api_key_for_reads
     def api_products():
         """Get all products with current state."""
         try:
@@ -200,11 +275,12 @@ def create_app():
                     'selector_source': selector_source,
                 })
 
-            return jsonify(result)
+            return jsonify(_paginate(result))
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/stats')
+    @require_api_key_for_reads
     def api_product_stats():
         """Get statistics for a product."""
         try:
@@ -264,9 +340,10 @@ def create_app():
                 stats = history.get_stats(url, days=days)
                 return jsonify(stats)
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/product/history')
+    @require_api_key_for_reads
     def api_product_history():
         """Get price history for a single product.
 
@@ -360,9 +437,10 @@ def create_app():
             else:
                 return jsonify(result)
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/toggle', methods=['POST'])
+    @require_api_key
     def api_toggle_product():
         """Toggle product enabled status."""
         try:
@@ -392,9 +470,10 @@ def create_app():
             
             return jsonify({'success': True, 'enabled': [p for p in updated_products if p.url == url][0].enabled})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/check', methods=['POST'])
+    @require_api_key
     def api_check_product():
         """Manually trigger price check for a product."""
         try:
@@ -482,9 +561,11 @@ def create_app():
                 'currency_source': currency_source
             })
         except (OSError, ValueError, sqlite3.Error, requests.exceptions.RequestException) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/products/check-all', methods=['POST'])
+    @require_api_key
+    @_rate_limit("2 per minute")
     def api_check_all_products():
         """Trigger price check for all enabled products.
 
@@ -568,14 +649,16 @@ def create_app():
                 'timestamp': datetime.now(timezone.utc).isoformat()
             })
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/config', methods=['GET'])
+    @require_api_key_for_reads
     def api_get_config():
         cfg = load_config(flask_app.config['CONFIG_FILE'])
         return jsonify({'base_currency': cfg.get('base_currency', 'CAD')})
 
     @flask_app.route('/api/config/base-currency', methods=['POST'])
+    @require_api_key
     def api_set_base_currency():
         try:
             data = request.get_json() or {}
@@ -589,9 +672,11 @@ def create_app():
             flask_app.config['BASE_CURRENCY'] = new_cur
             return jsonify({'success': True, 'base_currency': new_cur})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/delete', methods=['POST'])
+    @require_api_key
+    @_rate_limit("10 per minute")
     def api_delete_product():
         """Delete a product."""
         try:
@@ -612,9 +697,11 @@ def create_app():
             
             return jsonify({'success': True})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/products/auto-detect-all', methods=['POST'])
+    @require_api_key
+    @_rate_limit("2 per minute")
     def api_auto_detect_all():
         """Attempt to auto-detect price selectors for all products."""
         try:
@@ -660,9 +747,10 @@ def create_app():
             })
         except (OSError, ValueError, sqlite3.Error, requests.exceptions.RequestException) as e:
             logging.error("Bulk auto-detect error: %s", e)
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/add', methods=['POST'])
+    @require_api_key
     def api_add_product():
         """Add a new product."""
         try:
@@ -673,26 +761,40 @@ def create_app():
             for field in required:
                 if not data.get(field):
                     return jsonify({'error': f'{field} is required'}), 400
+
+            # Validate URL scheme
+            parsed_url = urlparse(data['url'])
+            if parsed_url.scheme not in ('http', 'https'):
+                return jsonify({'error': 'URL must use http or https'}), 400
+
+            # Validate name length
+            if len(data['name']) > 500:
+                return jsonify({'error': 'Name must be 500 characters or fewer'}), 400
             
             # Parse and validate optional numeric fields
             def _parse_float(val, field_name):
                 if val in (None, ''):
                     return None
                 try:
-                    return float(val)
+                    result = float(val)
                 except (TypeError, ValueError) as exc:
                     raise ValueError(f'{field_name} must be a valid number') from exc
+                if result < 0:
+                    raise ValueError(f'{field_name} must not be negative')
+                return result
 
             def _parse_int(val, field_name, default=None):
                 if val in (None, ''):
                     return default
                 try:
                     parsed = int(val)
-                    if parsed < 0:
-                        raise ValueError(f'{field_name} must be a positive number')
-                    return parsed
                 except (TypeError, ValueError) as e:
                     raise ValueError(f'{field_name} must be a valid positive integer') from e
+                if parsed < 0:
+                    raise ValueError(f'{field_name} must be a positive number')
+                if parsed > 8760:
+                    raise ValueError(f'{field_name} must be 8760 or fewer')
+                return parsed
 
             try:
                 target_price = _parse_float(data.get('target_price'), 'target_price')
@@ -795,9 +897,10 @@ def create_app():
                 'notification_cooldown_hours': new_product.notification_cooldown_hours
             }})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/product/update', methods=['POST'])
+    @require_api_key
     def api_update_product():
         """Update an existing product."""
         try:
@@ -827,11 +930,11 @@ def create_app():
                             return current
                         try:
                             parsed = int(val)
-                            if parsed < 0:
-                                raise ValueError(f'{field_name} must be a positive number')
-                            return parsed
                         except (TypeError, ValueError) as exc:
                             raise ValueError(f'{field_name} must be a valid positive integer') from exc
+                        if parsed < 0:
+                            raise ValueError(f'{field_name} must be a positive number')
+                        return parsed
 
                     try:
                         target_price = _parse_float(data.get('target_price'), p.target_price, 'target_price')
@@ -868,9 +971,10 @@ def create_app():
                 'selector': updated.selector
             }})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/alerts')
+    @require_api_key_for_reads
     def api_alerts():
         """Get products that have hit their price targets or discount thresholds."""
         try:
@@ -979,9 +1083,10 @@ def create_app():
 
             return jsonify(alerts)
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/compare/groups')
+    @require_api_key_for_reads
     def api_compare_groups():
         """Return competitive groups built from identifiers in state."""
         try:
@@ -990,15 +1095,16 @@ def create_app():
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
             try:
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
-                return jsonify(groups)
+                return jsonify(_paginate(groups))
             except Exception as e:
                 logging.error("Comparison group build failed: %s", e)
-                # Return empty groups to avoid breaking UI; details logged server-side
-                return jsonify([])
+                return jsonify(_paginate([]))
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/compare/backfill-identifiers', methods=['POST'])
+    @require_api_key
+    @_rate_limit("2 per minute")
     def api_compare_backfill_identifiers():
         """Backfill product identifiers in state by scraping pages.
 
@@ -1030,9 +1136,10 @@ def create_app():
             save_state(flask_app.config['STATE_FILE'], state)
             return jsonify({'success': True, 'updated': updated, 'failed': failed})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/compare/suggest')
+    @require_api_key_for_reads
     def api_compare_suggest():
         """Suggest likely competitor pairs based on fuzzy name matching.
 
@@ -1059,11 +1166,12 @@ def create_app():
                         })
             # Sort by similarity desc
             suggestions.sort(key=lambda s: s['similarity'], reverse=True)
-            return jsonify(suggestions)
+            return jsonify(_paginate(suggestions))
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/compare/link', methods=['POST'])
+    @require_api_key
     def api_compare_link():
         """Link two product URLs under a shared manual group_key.
 
@@ -1092,9 +1200,10 @@ def create_app():
             save_state(flask_app.config['STATE_FILE'], state)
             return jsonify({'success': True, 'group_key': group_key})
         except (OSError, ValueError) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/discovery/suggest')
+    @require_api_key_for_reads
     def api_discovery_suggest():
         """Get smart suggestions for products available at other retailers.
         
@@ -1151,9 +1260,10 @@ def create_app():
             return jsonify(suggestions)
         except Exception as e:
             logging.error(f"Discovery suggest error: {e}")
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/discovery/search')
+    @require_api_key_for_reads
     def api_discovery_search():
         """General product search across retailers.
         
@@ -1196,9 +1306,10 @@ def create_app():
             })
         except Exception as e:
             logging.error(f"Discovery search error: {e}")
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/discovery/status')
+    @require_api_key_for_reads
     def api_discovery_status():
         """Get discovery scanner status and metadata."""
         try:
@@ -1213,9 +1324,11 @@ def create_app():
             })
         except Exception as e:
             logging.error(f"Discovery status error: {e}")
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/discovery/scan', methods=['POST'])
+    @require_api_key
+    @_rate_limit("1 per minute")
     def api_discovery_scan():
         """Trigger immediate discovery scan."""
         try:
@@ -1240,9 +1353,10 @@ def create_app():
             })
         except Exception as e:
             logging.error(f"Discovery scan error: {e}")
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/failures')
+    @require_api_key_for_reads
     def api_failures():
         """Get detailed failure information for all products."""
         try:
@@ -1280,11 +1394,12 @@ def create_app():
             # Sort by failure rate descending, then by failed count
             failures.sort(key=lambda x: (x['failure_rate'], x['failed_checks']), reverse=True)
             
-            return jsonify(failures)
+            return jsonify(_paginate(failures))
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
     
     @flask_app.route('/api/export/history')
+    @require_api_key_for_reads
     def api_export_history():
         """Export all price history as CSV."""
         try:
@@ -1315,9 +1430,10 @@ def create_app():
                 }
             )
         except (OSError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/history/all')
+    @require_api_key_for_reads
     def api_history_all():
         """Get price history time series for all products.
 
@@ -1425,11 +1541,12 @@ def create_app():
                 })
                 seen_urls.add(url)
 
-            return jsonify(result)
+            return jsonify(_paginate(result))
         except (OSError, ValueError, sqlite3.Error) as e:
-            return jsonify({'error': str(e)}), 500
+            return _safe_error(e)
 
     @flask_app.route('/api/health')
+    @require_api_key_for_reads
     def api_health():
         """Basic health check: DB integrity and history row count."""
         try:
@@ -1446,7 +1563,8 @@ def create_app():
                     rows = 0
             return jsonify({'integrity_ok': ok, 'rows': rows})
         except (sqlite3.Error, OSError, ValueError) as e:
-            return jsonify({'integrity_ok': False, 'error': str(e)}), 500
+            logger.error("Health check failed: %s", e, exc_info=True)
+            return jsonify({'integrity_ok': False, 'error': 'Health check failed'}), 500
 
     # ---------------- Product Image Endpoint (added) -----------------
     # Simple in-memory image cache: {url: {image_url: str, fetched: datetime}}
@@ -1454,7 +1572,6 @@ def create_app():
 
     def _is_public_url(url: str) -> bool:
         """Basic SSRF guard: allow only http/https and public IPs/hosts."""
-        from urllib.parse import urlparse
         import socket
         import ipaddress
 
@@ -1498,6 +1615,13 @@ def create_app():
             except (ValueError, OSError):
                 return False
         return True
+
+    # Set Pillow decompression bomb limit
+    try:
+        from PIL import Image as _PILImage
+        _PILImage.MAX_IMAGE_PIXELS = 25_000_000  # ~5000x5000
+    except ImportError:
+        pass
 
     def _extract_image_url(html: str, base_url: str) -> str | None:
         """Extract representative product image URL from HTML.
@@ -1709,9 +1833,8 @@ def create_app():
                 return None
             content_type = r.headers.get('Content-Type', '').lower()
             if not content_type.startswith('image/'):
-                guessed, _ = mimetypes.guess_type(image_url)
-                if not (guessed and guessed.startswith('image/')):
-                    return None
+                # Reject non-image content types — don't trust URL extension alone
+                return None
             # Enforce a hard cap on downloaded bytes (e.g., 5 MiB)
             max_bytes = int(os.getenv('IMAGE_MAX_BYTES', '5242880'))
             read = 0
@@ -1747,6 +1870,7 @@ def create_app():
         return out_path
 
     @flask_app.route('/api/product/image')
+    @require_api_key_for_reads
     def api_product_image():
         product_url = request.args.get('url')
         if not product_url:
@@ -1759,6 +1883,8 @@ def create_app():
         return jsonify({'image_url': img, 'cached': True})
 
     @flask_app.route('/api/product/image/file')
+    @require_api_key_for_reads
+    @_rate_limit("30 per minute")
     def api_product_image_file():
         """Proxy, resize, and cache a product image to serve locally.
 

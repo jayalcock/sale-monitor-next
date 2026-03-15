@@ -80,34 +80,58 @@ class PriceAutoDetector:
             Tuple of (selector, platform, confidence) if found, or ('', '', 0.0) if not found
         """
         soup = BeautifulSoup(html, 'html.parser')
-        
+
+        # Pass 1: strict price validation
+        result = self._scan_patterns(soup, strict=True)
+        if result:
+            self.last_detected_selector, self.last_detected_platform, self.last_confidence = result
+            return result
+
+        # Pass 2: relaxed validation (any short text containing digits)
+        import logging
+        logging.getLogger(__name__).debug(
+            "Auto-detect pass 1 found nothing; retrying with relaxed matching"
+        )
+        result = self._scan_patterns(soup, strict=False)
+        if result:
+            # Halve confidence to signal the match is weaker
+            selector, platform, confidence = result
+            confidence *= 0.5
+            self.last_detected_selector = selector
+            self.last_detected_platform = platform
+            self.last_confidence = confidence
+            return (selector, platform, confidence)
+
+        return ('', '', 0.0)
+
+    def _scan_patterns(
+        self, soup: BeautifulSoup, *, strict: bool = True
+    ) -> Optional[Tuple[str, str, float]]:
+        """Scan PATTERNS against *soup*. When *strict* is False, accept any
+        short numeric text even without a currency indicator."""
         best_match = None
         best_confidence = 0.0
-        
+
         for selector, platform, confidence in self.PATTERNS:
             try:
                 elements = soup.select(selector)
                 if elements:
-                    # Check if the element contains price-like text
                     for elem in elements:
                         text = elem.get_text(strip=True)
-                        if self._looks_like_price(text) and self._is_single_price(text):
+                        ok = (
+                            self._looks_like_price(text)
+                            if strict
+                            else self._looks_like_number(text)
+                        )
+                        if ok and self._is_single_price(text):
                             if confidence > best_confidence:
                                 best_match = (selector, platform, confidence)
                                 best_confidence = confidence
                             break
             except Exception:
-                # Invalid selector or parsing error, skip
                 continue
-        
-        if best_match:
-            self.last_detected_selector = best_match[0]
-            self.last_detected_platform = best_match[1]
-            self.last_confidence = best_match[2]
-            return best_match
-        
-        # Return empty tuple instead of None
-        return ('', '', 0.0)
+
+        return best_match
     
     @staticmethod
     def _looks_like_price(text: str) -> bool:
@@ -134,6 +158,14 @@ class PriceAutoDetector:
         
         # Return True if it has price indicators or looks numeric enough
         return has_indicator or (is_short and has_decimal)
+
+    @staticmethod
+    def _looks_like_number(text: str) -> bool:
+        """Relaxed check: short text that contains at least one digit."""
+        if not text:
+            return False
+        text = text.strip()
+        return len(text) < 50 and any(c.isdigit() for c in text)
     
     @staticmethod
     def _is_single_price(text: str) -> bool:

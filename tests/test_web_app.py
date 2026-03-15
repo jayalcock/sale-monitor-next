@@ -58,7 +58,7 @@ def test_products_list_and_add_duplicate(tmp_path):
     r0 = client.get("/api/products")
     assert r0.status_code == 200
     data0 = r0.get_json()
-    urls0 = {p["url"] for p in data0}
+    urls0 = {p["url"] for p in data0["items"]}
     assert "https://example.com/w" in urls0
 
     # add a second product
@@ -109,7 +109,7 @@ def test_check_all_endpoint(_mock_extract, tmp_path):
     assert body.get("failed") >= 0
 
     # Products should now have last_checked timestamps
-    products = client.get("/api/products").get_json()
+    products = client.get("/api/products").get_json()["items"]
     urls_with_ts = [p for p in products if p.get("last_checked")]
     assert len(urls_with_ts) >= body.get("updated", 0)
 
@@ -244,8 +244,8 @@ def test_history_all_endpoint(_mock_extract, tmp_path):
     r = client.get("/api/history/all", query_string={"days": 30})
     assert r.status_code == 200
     body = r.get_json()
-    assert isinstance(body, list)
-    assert any(item["url"] == "https://example.com/w" and len(item.get("series", [])) >= 1 for item in body)
+    assert "items" in body
+    assert any(item["url"] == "https://example.com/w" and len(item.get("series", [])) >= 1 for item in body["items"])
 
 
 @patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=(5.55, 'manual'))
@@ -262,7 +262,7 @@ def test_history_all_deduplicates_by_url(_mock_extract, tmp_path):
     assert r.status_code == 200
     data = r.get_json()
     # only one dataset for the URL
-    items_for_url = [it for it in data if it["url"] == url]
+    items_for_url = [it for it in data["items"] if it["url"] == url]
     assert len(items_for_url) == 1
     assert len(items_for_url[0].get("series", [])) >= 2
 

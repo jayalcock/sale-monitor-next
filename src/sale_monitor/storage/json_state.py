@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
 from sale_monitor.storage.file_lock import FileLock
 
@@ -35,3 +35,30 @@ def save_state(path: str, data: Dict[str, Any]) -> None:
         Path(tmp.name).replace(p)
     finally:
         lock.release()
+
+
+def prune_stale_entries(
+    state_path: str,
+    active_urls: Set[str],
+    max_identifiers: int = 50,
+) -> int:
+    """Remove state entries for URLs not in *active_urls* and cap identifiers.
+
+    Returns the number of stale entries removed.
+    """
+    state = load_state(state_path)
+    stale = [url for url in state if url not in active_urls]
+    for url in stale:
+        del state[url]
+
+    # Cap identifiers dict size per product
+    for rec in state.values():
+        ids = rec.get("identifiers")
+        if isinstance(ids, dict) and len(ids) > max_identifiers:
+            # Keep only the last N items (dict preserves insertion order in 3.7+)
+            keys = list(ids.keys())
+            for k in keys[:-max_identifiers]:
+                del ids[k]
+
+    save_state(state_path, state)
+    return len(stale)

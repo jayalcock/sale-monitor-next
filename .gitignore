@@ -9,7 +9,8 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
-data/images/
+data/
+
 
 
 # OS/Editor junk

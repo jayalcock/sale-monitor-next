@@ -420,6 +420,7 @@ function loadStats(url, groupKey) {
 }
 
 function loadHistory(url, groupKey) {
+    console.log('loadHistory called with:', {url, groupKey});
     const days = 30;
     const currencyMode = document.getElementById('currency-toggle')?.value || 'base';
     const qs = groupKey 
@@ -427,25 +428,24 @@ function loadHistory(url, groupKey) {
         : `url=${encodeURIComponent(url)}&days=${days}`;
     fetch(`/api/product/history?${qs}`)
         .then(response => {
+            console.log('API response status:', response.status);
             if (!response.ok) throw new Error('Failed to fetch history');
             return response.json();
         })
         .then(history => {
+            console.log('History received:', {count: history.length, sampleDates: history.slice(0, 3).map(h => h.timestamp.substring(0, 10))});
             if (history.length === 0) {
                 document.getElementById('price-chart').insertAdjacentHTML('beforebegin', 
                     '<p class="text-muted">No price history available yet.</p>');
                 return;
             }
 
-            // Group by LOCAL day and keep the LOWEST price per day
+            // Group by UTC day (from timestamp string) and keep the LOWEST price per day
             const dayMap = {};
+            const allDates = [];
             history.forEach(h => {
-                const d = parseUtcIso(h.timestamp);
-                if (!d) return;
-                
-                // Convert to local date for grouping (YYYY-MM-DD in local timezone)
-                const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-                const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+                // Extract YYYY-MM-DD directly from ISO timestamp (first 10 chars)
+                const key = h.timestamp.substring(0, 10);
                 
                 // Use price_in_base for Base mode, native price for Native mode
                 const v = (currencyMode === 'base')
@@ -457,19 +457,45 @@ function loadHistory(url, groupKey) {
                     if (!(key in dayMap) || Number(v) < dayMap[key]) {
                         dayMap[key] = Number(v);
                     }
+                    allDates.push(key);
                 }
             });
 
-            // Build last N days array using LOCAL dates
+            // Build date range from actual data (not fixed 30 days)
             const daysArr = [];
             const dayKeys = [];
-            for (let i = days - 1; i >= 0; i--) {
-                const local = new Date();
-                local.setHours(0,0,0,0);
-                local.setDate(local.getDate() - i);
-                daysArr.push(local);
-                const key = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
-                dayKeys.push(key);
+            if (allDates.length > 0) {
+                const uniqueDates = [...new Set(allDates)].sort();
+                const minDateStr = uniqueDates[0];
+                const maxDateStr = uniqueDates[uniqueDates.length - 1];
+                
+                // Parse dates as UTC (YYYY-MM-DD format)
+                const [minY, minM, minD] = minDateStr.split('-').map(Number);
+                const [maxY, maxM, maxD] = maxDateStr.split('-').map(Number);
+                
+                // Create UTC dates
+                const minDate = new Date(Date.UTC(minY, minM - 1, minD));
+                const maxDate = new Date(Date.UTC(maxY, maxM - 1, maxD));
+                
+                const current = new Date(minDate);
+                while (current.toISOString().substring(0, 10) <= maxDateStr) {
+                    const dateStr = current.toISOString().substring(0, 10);
+                    dayKeys.push(dateStr);
+                    // Store as local date for display
+                    daysArr.push(new Date(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
+                    current.setUTCDate(current.getUTCDate() + 1);
+                }
+                
+                // DEBUG: Log what we're building
+                console.log('Chart debug:', {
+                    historyLength: history.length,
+                    uniqueDatesCount: [...new Set(allDates)].length,
+                    minDate: minDateStr,
+                    maxDate: maxDateStr,
+                    daysArrLength: daysArr.length,
+                    dayKeysLength: dayKeys.length,
+                    dayKeysSample: dayKeys.slice(-5)
+                });
             }
 
             // Map day keys to prices (null if no data for that day)
@@ -641,6 +667,7 @@ function loadData() {
                 loadProductInfo(resolved),
                 loadStats(resolved, groupKey)
             ]).then(() => {
+                console.log('loadProductInfo and loadStats complete, now rendering chart');
                 // Render chart based on current mode
                 const modeSel = document.getElementById('group-mode-toggle');
                 const mode = (groupKey && modeSel) ? modeSel.value : null;
@@ -650,8 +677,9 @@ function loadData() {
                     if (mk) {
                         // Use existing handler logic by calling the renderer
                         fetch('/api/compare/groups')
-                            .then(r => r.ok ? r.json() : [])
-                            .then(groups => {
+                            .then(r => r.ok ? r.json() : {items:[]})
+                            .then(data => {
+                                const groups = Array.isArray(data) ? data : (data.items || []);
                                 const g = (groups || []).find(x => x.group_key === mk);
                                 if (!g || !Array.isArray(g.items) || !g.items.length) { loadHistory(resolved, mk); return; }
                                 const days = 30;
@@ -663,10 +691,8 @@ function loadData() {
                                     const series = list.map((hist) => {
                                         const dayMap = {};
                                         hist.forEach(h => {
-                                            const d = parseUtcIso(h.timestamp);
-                                            if (!d) return;
-                                            const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-                                            const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+                                            // Extract YYYY-MM-DD directly from ISO timestamp (first 10 chars)
+                                            const key = h.timestamp.substring(0, 10);
                                             const v = (currencyMode === 'base') ? h.price_in_base : h.price;
                                             if (v != null) {
                                                 if (!(key in dayMap) || Number(v) < dayMap[key]) {
@@ -688,15 +714,15 @@ function loadData() {
                                         return { label: merchant, data, borderColor: color, backgroundColor: color.replace('50%','80%'), spanGaps: true, tension: 0.15, pointRadius: 0, pointHoverRadius: 6, pointHoverBorderWidth: 2, pointHoverBorderColor: '#fff' };
                                     });
                                     chart = new Chart(ctx, { type: 'line', data: { labels: allDates.map(d => new Date(d).toLocaleDateString()), datasets }, plugins: [darkBgPlugin], options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } }, interaction: { mode: 'nearest', intersect: false }, scales: { x: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', callback: v => `$${Number(v).toFixed(2)}` } } } } });
-                                });
-                            });
+                                }).catch(e => console.error('Error rendering group chart:', e));
+                            }).catch(e => console.error('Error fetching compare groups:', e));
                     } else {
                         loadHistory(resolved, groupKey);
                     }
                 } else {
                     loadHistory(resolved, groupKey);
                 }
-            });
+            }).catch(e => console.error('Error in chart rendering:', e));
         })
         .then(() => {
             document.getElementById('loading').style.display = 'none';
@@ -710,8 +736,9 @@ function loadData() {
                 groupBadge.classList.remove('hidden');
                 // Fetch members
                 fetch('/api/compare/groups')
-                    .then(r => r.ok ? r.json() : [])
-                    .then(groups => {
+                    .then(r => r.ok ? r.json() : {items:[]})
+                    .then(data => {
+                        const groups = Array.isArray(data) ? data : (data.items || []);
                         const g = (groups || []).find(x => x.group_key === groupKey);
                         if (g && Array.isArray(g.items) && g.items.length) {
                             const html = g.items.map(it => {
@@ -785,8 +812,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (mode === 'individual' && groupKey) {
                 // Render individual series for group members
                 fetch('/api/compare/groups')
-                    .then(r => r.ok ? r.json() : [])
-                    .then(groups => {
+                    .then(r => r.ok ? r.json() : {items:[]})
+                    .then(data => {
+                        const groups = Array.isArray(data) ? data : (data.items || []);
                         const g = (groups || []).find(x => x.group_key === groupKey);
                         if (!g || !Array.isArray(g.items) || !g.items.length) return;
                         const days = 30;
@@ -799,10 +827,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             const series = list.map((hist, idx) => {
                                 const dayMap = {};
                                 hist.forEach(h => {
-                                    const d = parseUtcIso(h.timestamp);
-                                    if (!d) return;
-                                    const localDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-                                    const key = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+                                    // Extract YYYY-MM-DD directly from ISO timestamp (first 10 chars)
+                                    const key = h.timestamp.substring(0, 10);
                                     const v = (currencyMode === 'base') ? h.price_in_base : h.price;
                                     if (v != null) {
                                         if (!(key in dayMap) || Number(v) < dayMap[key]) {
