@@ -241,6 +241,10 @@ def create_app():
             state = load_state(flask_app.config['STATE_FILE'])
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
 
+            # Create exchange service once, reuse across all products
+            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            ex_service = ExchangeRateService(cache_handler=history)
+
             result = []
             for p in products:
                 state_data = state.get(p.url, {})
@@ -256,8 +260,6 @@ def create_app():
                         if currency == base_currency:
                             price_in_base = current_price
                         else:
-                            history = PriceHistory(flask_app.config['HISTORY_DB'])
-                            ex_service = ExchangeRateService(cache_handler=history)
                             converted = ex_service.convert(float(current_price), currency, base_currency)
                             price_in_base = converted if converted is not None else None
                     except (ValueError, TypeError):

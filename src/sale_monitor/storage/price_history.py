@@ -98,6 +98,16 @@ class PriceHistory:
                 CREATE INDEX IF NOT EXISTS idx_timestamp 
                 ON price_history(timestamp)
             """)
+            # Composite index for the most common query pattern
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_product_url_timestamp
+                ON price_history(product_url, timestamp DESC)
+            """)
+            # Composite index for failure stats queries
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_product_url_status
+                ON price_history(product_url, check_status, timestamp DESC)
+            """)
             
             # Exchange rates cache table
             conn.execute("""
@@ -309,44 +319,25 @@ class PriceHistory:
         cutoff_iso = cutoff.isoformat()
         
         with sqlite3.connect(self.db_path) as conn:
-            # Get total and failed counts
+            # Single query for all failure stats
+            # Counts are scoped to cutoff window; last_success/last_failure span all time
             cursor = conn.execute(
                 """
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN check_status != 'success' THEN 1 ELSE 0 END) as failed
+                SELECT
+                    SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END) AS total,
+                    SUM(CASE WHEN timestamp >= ? AND check_status != 'success' THEN 1 ELSE 0 END) AS failed,
+                    MAX(CASE WHEN check_status = 'success' THEN timestamp END) AS last_success,
+                    MAX(CASE WHEN check_status != 'success' THEN timestamp END) AS last_failure
                 FROM price_history
-                WHERE product_url = ? AND timestamp >= ?
+                WHERE product_url = ?
                 """,
-                (product_url, cutoff_iso)
+                (cutoff_iso, cutoff_iso, product_url)
             )
             row = cursor.fetchone()
-            total = row[0] if row else 0
+            total = row[0] if row and row[0] else 0
             failed = row[1] if row and row[1] else 0
-            
-            # Get last success timestamp
-            cursor = conn.execute(
-                """
-                SELECT timestamp FROM price_history
-                WHERE product_url = ? AND check_status = 'success'
-                ORDER BY timestamp DESC LIMIT 1
-                """,
-                (product_url,)
-            )
-            last_success_row = cursor.fetchone()
-            last_success = last_success_row[0] if last_success_row else None
-            
-            # Get last failure timestamp
-            cursor = conn.execute(
-                """
-                SELECT timestamp FROM price_history
-                WHERE product_url = ? AND check_status != 'success'
-                ORDER BY timestamp DESC LIMIT 1
-                """,
-                (product_url,)
-            )
-            last_failure_row = cursor.fetchone()
-            last_failure = last_failure_row[0] if last_failure_row else None
+            last_success = row[2] if row else None
+            last_failure = row[3] if row else None
             
         failure_rate = (failed / total * 100) if total > 0 else 0
         

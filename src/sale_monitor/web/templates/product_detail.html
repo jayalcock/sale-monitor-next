@@ -2,6 +2,10 @@
 
 {% block title %}Product Details - Sale Monitor{% endblock %}
 
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
 <!-- v2.0 - price_in_base only, no price_cad fallback -->
 {% block content %}
 <div class="mb-4 flex items-center justify-between flex-wrap gap-2">
