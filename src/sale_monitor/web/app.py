@@ -257,6 +257,7 @@ def create_app():
                     'enabled': p.enabled,
                     'selector': p.selector,
                     'selector_source': selector_source,
+                    'identifiers': state_data.get('identifiers', {}),
                 })
 
             return jsonify(_paginate(result))

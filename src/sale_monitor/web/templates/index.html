@@ -325,6 +325,20 @@ let GROUPS = [];
 let URL_TO_GROUP = {}; // url -> group_key
 let GROUP_PRIMARY_URL = {}; // group_key -> primary url (lowest priced)
 
+function buildSearchQuery(product) {
+    const id = product.identifiers || {};
+    if (id.mpn) return id.mpn;
+    if (id.sku) return id.sku;
+    if (id.gtin || id.gtin13) return id.gtin || id.gtin13;
+    if (id.brand && id.model) return id.brand + ' ' + id.model;
+    if (id.brand && id.name) return id.brand + ' ' + id.name;
+    return product.name;
+}
+
+function googleShoppingUrl(product) {
+    return 'https://www.google.com/search?tbm=shop&q=' + encodeURIComponent(buildSearchQuery(product));
+}
+
 function getMerchant(product) {
     try {
         const u = new URL(product.url);
@@ -425,7 +439,7 @@ function renderProductCard(product) {
                     </div>
                     <div class="mt-auto flex flex-col gap-2">
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-primary-600 text-sm font-medium rounded-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button>
-                        <a href="https://www.google.com/search?tbm=shop&q=${encodeURIComponent(product.name)}" target="_blank" rel="noopener" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500">🔍 Find Elsewhere</a>
+                        <a href="${googleShoppingUrl(product)}" target="_blank" rel="noopener" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500">🔍 Find Elsewhere</a>
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                     </div>
                 </div>
@@ -512,7 +526,7 @@ function renderProductRow(product) {
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
-                    <a href="https://www.google.com/search?tbm=shop&q=${encodeURIComponent(product.name)}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
+                    <a href="${googleShoppingUrl(product)}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
                     <button class="inline-flex items-center px-3 py-2 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
             </td>
