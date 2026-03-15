@@ -815,7 +815,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const toggle = document.getElementById('currency-toggle');
     if (toggle) {
+        const savedCurrency = localStorage.getItem('productDetailCurrency');
+        if (savedCurrency && toggle.querySelector(`option[value="${savedCurrency}"]`)) {
+            toggle.value = savedCurrency;
+        }
         toggle.addEventListener('change', () => {
+            localStorage.setItem('productDetailCurrency', toggle.value);
             const url = RESOLVED_URL || getUrlParameter('url');
             const groupKey = getUrlParameter('group_key');
             const modeSel = document.getElementById('group-mode-toggle');

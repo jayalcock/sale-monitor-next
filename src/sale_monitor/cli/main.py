@@ -11,7 +11,9 @@ from datetime import datetime, timedelta
 import schedule
 from dotenv import load_dotenv
 
+from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.services.price_extractor import PriceExtractor
+from sale_monitor.storage.config_store import get_base_currency
 from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.storage.product_store import ProductStore
@@ -79,9 +81,24 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
             currency = detected_currency or 'CAD'
             currency_source = 'detected' if detected_currency else 'default'
         
+        # Compute base-currency price so historical records reflect the
+        # exchange rate at check time rather than being recomputed later.
+        config_file = os.getenv('CONFIG_FILE', 'data/config.json')
+        base_currency = get_base_currency(config_file)
+        price_in_base = None
+        if currency == base_currency:
+            price_in_base = price
+        elif history:
+            try:
+                ex_service = ExchangeRateService(cache_handler=history)
+                converted = ex_service.convert(float(price), currency, base_currency)
+                price_in_base = converted if converted is not None else None
+            except Exception:
+                pass
+
         # Record price in history
         if history:
-            history.record_price(p.url, p.name, price, currency=currency)
+            history.record_price(p.url, p.name, price, currency=currency, price_cad=price_in_base)
 
         now = datetime.now().isoformat()
         key = p.url  # Use URL as stable key
@@ -105,6 +122,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
             "last_price": old_price,
             "currency": currency,
             "currency_source": currency_source,
+            "price_in_base": price_in_base,
             "identifiers": merged_identifiers,
             "group_key": rec.get("group_key"),  # Preserve manual group_key
         })

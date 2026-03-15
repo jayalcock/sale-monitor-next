@@ -401,14 +401,18 @@ def create_app():
                     ]
 
             result = []
-            for (ts, price, status, currency, _) in records:
+            for (ts, price, status, currency, stored_price_cad) in records:
                 if status != 'success':
                     continue
 
-                # Compute price in configured base currency
+                # Prefer stored base-currency price (recorded at check time with
+                # the exchange rate that was current then). Fall back to live
+                # conversion only when the stored value is missing.
                 price_in_base = None
                 try:
-                    if price is not None and currency:
+                    if stored_price_cad is not None:
+                        price_in_base = float(stored_price_cad)
+                    elif price is not None and currency:
                         if currency.upper() == base_currency:
                             price_in_base = price
                         else:
@@ -552,7 +556,7 @@ def create_app():
             
             # Record in history (count as success so stats include manual checks)
             history = PriceHistory(flask_app.config['HISTORY_DB'])
-            history.record_price(product.url, product.name, price, status='success', currency=currency)
+            history.record_price(product.url, product.name, price, status='success', currency=currency, price_cad=price_in_base)
             
             return jsonify({
                 'success': True,
@@ -636,7 +640,7 @@ def create_app():
                         'price_in_base': price_in_base,
                         'identifiers': getattr(extractor, 'last_identifiers', {}) or prev_state.get('identifiers')
                     }
-                    history.record_price(p.url, p.name, price, status='success', currency=currency)
+                    history.record_price(p.url, p.name, price, status='success', currency=currency, price_cad=price_in_base)
                     updated += 1
                 except (requests.exceptions.RequestException, ValueError, sqlite3.Error):
                     # Record failure in history for alerts tracking
@@ -879,7 +883,7 @@ def create_app():
                     
                     # Record in history
                     history = PriceHistory(flask_app.config['HISTORY_DB'])
-                    history.record_price(new_product.url, new_product.name, price, status='success', currency=currency)
+                    history.record_price(new_product.url, new_product.name, price, status='success', currency=currency, price_cad=price_in_base)
                     
                     logging.info(f"Auto-checked new product '{new_product.name}': ${price} {currency}")
                 else:
@@ -1479,25 +1483,29 @@ def create_app():
                 if downsample:
                     # Keep latest success per day
                     day_best = {}
-                    for (ts, price, status, currency, _) in records:
+                    for (ts, price, status, currency, stored_cad) in records:
                         if status != 'success' or price is None:
                             continue
                         day = ts[:10]
                         if day not in day_best:
-                            day_best[day] = (ts, price, currency)
+                            day_best[day] = (ts, price, currency, stored_cad)
                     day_records = sorted(day_best.values(), key=lambda r: r[0])
                 else:
                     day_records = [
-                        (ts, price, currency)
-                        for (ts, price, status, currency, _) in records
+                        (ts, price, currency, stored_cad)
+                        for (ts, price, status, currency, stored_cad) in records
                         if status == 'success' and price is not None
                     ]
 
                 series = []
-                for (ts, price, currency) in day_records:
+                for (ts, price, currency, stored_cad) in day_records:
+                    # Prefer stored base-currency price (recorded at check time).
+                    # Fall back to live conversion for legacy records.
                     price_in_base = None
                     try:
-                        if currency:
+                        if stored_cad is not None:
+                            price_in_base = float(stored_cad)
+                        elif currency:
                             if currency.upper() == base_currency:
                                 price_in_base = price
                             else:

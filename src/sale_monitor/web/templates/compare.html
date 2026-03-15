@@ -9,7 +9,12 @@
     </div>
     <p class="text-gray-300 text-sm mb-4">Groups are formed from the <strong>group</strong> column in products.csv, manual links, or auto-detected identifiers (MPN/SKU/GTIN). Only groups with 2+ vendors are shown.</p>
 
-    <div id="groupsContainer"></div>
+    <div id="groupsContainer">
+      <div id="groups-loading" class="space-y-4">
+        <div class="skeleton-card"><div class="flex items-center gap-3 mb-3"><div class="skeleton skeleton-heading" style="width:40%"></div><div class="skeleton" style="width:80px;height:1.5rem;border-radius:9999px"></div></div><div class="skeleton skeleton-text" style="width:70%"></div><div class="skeleton skeleton-text" style="width:55%"></div></div>
+        <div class="skeleton-card"><div class="flex items-center gap-3 mb-3"><div class="skeleton skeleton-heading" style="width:35%"></div><div class="skeleton" style="width:60px;height:1.5rem;border-radius:9999px"></div></div><div class="skeleton skeleton-text" style="width:65%"></div><div class="skeleton skeleton-text" style="width:50%"></div></div>
+      </div>
+    </div>
 
     <div class="mt-8">
       <h3 class="text-lg font-semibold text-white mb-2">Suggested Links (name-based)</h3>
@@ -18,29 +23,38 @@
   </div>
 
   <script>
+  function hideGroupsLoader() {
+    const loader = document.getElementById('groups-loading');
+    if (loader) loader.remove();
+  }
+
   async function fetchGroups() {
     try {
       const res = await fetch('/api/compare/groups');
       if (!res.ok) {
         const txt = await res.text();
+        hideGroupsLoader();
         showError('Server error: ' + txt.slice(0,200));
         return;
       }
       const data = await res.json();
       const groups = Array.isArray(data) ? data : (data.items || []);
       if (groups && groups.error) {
+        hideGroupsLoader();
         showError('Group build failed: ' + (groups.details || groups.error));
         return;
       }
       renderGroups(groups);
       fetchSuggestions();
     } catch (e) {
+      hideGroupsLoader();
       showError('Fetch failed: ' + e);
     }
   }
 
   function renderGroups(groups) {
     const container = document.getElementById('groupsContainer');
+    hideGroupsLoader();
     if (!Array.isArray(groups) || groups.length === 0) {
       container.innerHTML = `
         <div class="text-center py-12">
@@ -109,7 +123,7 @@ async function fetchSuggestions() {
       <div class="flex items-center justify-between border-b border-gray-700 py-2">
         <div class="mr-2">
           <div><a class="text-primary-300 hover:text-primary-200" href="${s.urlA}" target="_blank">${s.nameA}</a></div>
-          <div class="text-gray-400">↔︎ similarity ${s.similarity}</div>
+          <div class="text-gray-400" title="Name similarity: 0.0 (no match) to 1.0 (identical)">↔︎ similarity ${Number(s.similarity).toFixed(2)}</div>
           <div><a class="text-primary-300 hover:text-primary-200" href="${s.urlB}" target="_blank">${s.nameB}</a></div>
         </div>
         <div>
