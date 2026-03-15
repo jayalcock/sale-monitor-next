@@ -15,6 +15,12 @@
             <p id="last-update" class="mt-1 text-sm text-gray-400">Last update: --</p>
         </div>
         <div class="mt-4 sm:mt-0 flex gap-3">
+            <button id="export-csv-btn" class="inline-flex items-center px-4 py-2 border border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-primary-500">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                Export CSV
+            </button>
             <button id="update-all-btn" class="inline-flex items-center px-4 py-2 border border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-primary-500">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -98,6 +104,10 @@
                         <option value="base" selected>Currency: Base (CAD)</option>
                         <option value="native">Currency: Native</option>
                     </select>
+                    <select id="trend-tag-filter" class="block w-full sm:w-auto rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm px-3 py-2 border">
+                        <option value="">All Products</option>
+                        <option value="__changed__">Changed Only</option>
+                    </select>
                 </div>
             </div>
             <div class="mt-4 chart-responsive-wrapper">
@@ -140,17 +150,17 @@
             <table class="min-w-full divide-y divide-gray-700" id="products-table">
                 <thead class="bg-gray-900">
                     <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('name')">
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" tabindex="0" role="button" aria-sort="none" onclick="sortTable('name')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sortTable('name')}">
                             <div class="flex items-center">
                                 Product <span id="sort-name-icon" class="ml-1">⬍</span>
                             </div>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('merchant')">
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" tabindex="0" role="button" aria-sort="none" onclick="sortTable('merchant')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sortTable('merchant')}">
                             <div class="flex items-center">
                                 Merchant <span id="sort-merchant-icon" class="ml-1">⬍</span>
                             </div>
                         </th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" onclick="sortTable('price')">
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800" tabindex="0" role="button" aria-sort="none" onclick="sortTable('price')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sortTable('price')}">
                             <div class="flex items-center">
                                 Current Price <span id="sort-price-icon" class="ml-1">⬍</span>
                             </div>
@@ -294,6 +304,38 @@
     color: #6b7280;
 }
 
+/* Pagination */
+.show-more-btn {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    text-align: center;
+    color: #93c5fd;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.15s;
+}
+.show-more-btn:hover {
+    background: #374151;
+}
+
+/* Discount badge */
+.discount-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: #065f46;
+    color: #6ee7b7;
+    white-space: nowrap;
+}
+
 /* Product card images */
 .product-card-image-wrapper {
     width: 100%;
@@ -383,6 +425,7 @@
 <script>
 let refreshInterval;
 let trendsChart = null;
+let hiddenTrendLabels = new Set();  // persist legend selection across reloads
 let allProducts = [];
 let productAlerts = {}; // Map of URL -> alert object
 let sparklineHistory = {}; // Map of URL -> array of prices for sparklines
@@ -394,6 +437,124 @@ let currentView = localStorage.getItem('productView') || 'table';
 let GROUPS = [];
 let URL_TO_GROUP = {}; // url -> group_key
 let GROUP_PRIMARY_URL = {}; // group_key -> primary url (lowest priced)
+let displayLimit = 50; // pagination: how many products to show
+
+// --- Utility helpers ---
+
+function debounce(fn, delay) {
+    let timer;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+function fetchWithTimeout(url, opts = {}, ms = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+function saveFilterState() {
+    try {
+        const state = {
+            search: document.getElementById('search-input').value,
+            status: document.getElementById('status-filter').value,
+            tag: (document.getElementById('tags-filter') || {}).value || '',
+            sortBy,
+            sortDesc
+        };
+        localStorage.setItem('dashboardFilters', JSON.stringify(state));
+    } catch (e) {}
+}
+
+function restoreFilterState() {
+    try {
+        const raw = localStorage.getItem('dashboardFilters');
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (state.search) document.getElementById('search-input').value = state.search;
+        if (state.status) document.getElementById('status-filter').value = state.status;
+        if (state.sortBy) { sortBy = state.sortBy; sortDesc = !!state.sortDesc; }
+        // Tag filter is populated later; stash pending value
+        if (state.tag) {
+            const tf = document.getElementById('tags-filter');
+            if (tf) tf.dataset.pendingTag = state.tag;
+        }
+        // Reflect sort icon
+        updateSortIcons();
+    } catch (e) {}
+}
+
+function updateSortIcons() {
+    document.getElementById('sort-name-icon').textContent = '\u2b0d';
+    document.getElementById('sort-merchant-icon').textContent = '\u2b0d';
+    document.getElementById('sort-price-icon').textContent = '\u2b0d';
+    const el = document.getElementById(`sort-${sortBy}-icon`);
+    if (el) el.textContent = sortDesc ? '\u25bc' : '\u25b2';
+    // Update aria-sort
+    document.querySelectorAll('th[aria-sort]').forEach(th => th.setAttribute('aria-sort', 'none'));
+    const col = sortBy;
+    const headers = document.querySelectorAll('th[aria-sort]');
+    headers.forEach(th => {
+        if (th.getAttribute('onclick')?.includes(`'${col}'`)) {
+            th.setAttribute('aria-sort', sortDesc ? 'descending' : 'ascending');
+        }
+    });
+}
+
+function getDiscountPercent(product) {
+    const prices = sparklineHistory[product.url];
+    if (!prices || prices.length < 2) return null;
+    const currentBase = product.price_in_base != null ? Number(product.price_in_base) : null;
+    if (currentBase == null || currentBase <= 0) return null;
+    const maxPrice = Math.max(...prices);
+    if (maxPrice <= 0 || currentBase >= maxPrice) return null;
+    const pct = Math.round((1 - currentBase / maxPrice) * 100);
+    return pct >= 3 ? pct : null; // only show if >= 3% discount
+}
+
+function exportCSV() {
+    const filtered = filterAndSortProducts();
+    if (filtered.length === 0) { showError('No products to export.'); return; }
+    const rows = [['Name', 'Merchant', 'URL', 'Currency', 'Price', 'Price (Base)', 'Base Currency', 'Enabled', 'Tags', 'Last Checked']];
+    filtered.forEach(p => {
+        rows.push([
+            p.name,
+            getMerchant(p),
+            p.url,
+            p.currency || '',
+            p.current_price != null ? Number(p.current_price).toFixed(2) : '',
+            p.price_in_base != null ? Number(p.price_in_base).toFixed(2) : '',
+            p.base_currency || CURRENT_BASE_CURRENCY || 'CAD',
+            p.enabled ? 'Yes' : 'No',
+            (p.tags || []).join('; '),
+            p.last_checked || ''
+        ]);
+    });
+    const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `sale-monitor-export-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showSuccess(`Exported ${filtered.length} products to CSV`);
+}
+
+function populateTrendTagFilter() {
+    const sel = document.getElementById('trend-tag-filter');
+    if (!sel) return;
+    const current = sel.value;
+    const allTags = new Set();
+    (allProducts || []).forEach(p => {
+        (p.tags || []).forEach(t => { if (t) allTags.add(t); });
+    });
+    const sorted = Array.from(allTags).sort();
+    sel.innerHTML = '<option value="">All Products</option><option value="__changed__">Changed Only</option>' +
+        sorted.map(t => `<option value="${escapeHtml(t)}"${t === current ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('');
+    if (current) sel.value = current;
+}
 
 function buildSearchQuery(product) {
     const id = product.identifiers || {};
@@ -514,7 +675,7 @@ function renderProductCard(product) {
                         <a href="${historyUrl}" class="text-white hover:text-primary-400">${product.name}</a>
                     </h5>
                     <a href="${product.url}" target="_blank" class="text-primary-400 hover:text-primary-300 text-sm mb-3" style="text-decoration: underline;">${merchant}</a>
-                    <div class="text-2xl font-bold text-white mb-3">${formatPriceCell(product)}</div>
+                    <div class="text-2xl font-bold text-white mb-3">${formatPriceCell(product)}${(() => { const d = getDiscountPercent(product); return d ? ` <span class="discount-badge">${d}% off</span>` : ''; })()}</div>
                     <div class="mb-2"><canvas class="sparkline" data-url="${encodeURIComponent(product.url)}" width="160" height="32"></canvas></div>
                     <div class="mb-3 flex gap-2 flex-wrap">
                         ${statusBadge}
@@ -533,58 +694,50 @@ function renderProductCard(product) {
 }
 
 function loadCardImages() {
-    // Load images for all visible cards
+    // Lazy-load images using IntersectionObserver
     const cols = document.querySelectorAll('#products-cards [data-product-url]');
-    console.log('Loading images for', cols.length, 'cards');
-    
-    cols.forEach((col, index) => {
-        const productUrl = decodeURIComponent(col.dataset.productUrl);
+    if (!cols.length) return;
+
+    const loadImage = (col) => {
         const wrapper = col.querySelector('.product-card-image-wrapper');
-        
-        console.log('Card', index, 'URL:', productUrl);
-        
-        if (!wrapper || wrapper.dataset.loaded === 'true') {
-            console.log('Skipping card', index, '- wrapper:', !!wrapper, 'loaded:', wrapper?.dataset.loaded);
-            return;
-        }
+        if (!wrapper || wrapper.dataset.loaded === 'true') return;
         wrapper.dataset.loaded = 'true';
-        
-        // Try to load image
+        const productUrl = decodeURIComponent(col.dataset.productUrl);
         const imageUrl = `/api/product/image/file?url=${encodeURIComponent(productUrl)}&w=400&h=200`;
-        console.log('Fetching image:', imageUrl);
-        
-        fetch(imageUrl)
+        fetchWithTimeout(imageUrl, {}, 10000)
             .then(r => {
-                console.log('Image response status:', r.status, 'content-type:', r.headers.get('Content-Type'));
-                if (r.ok && r.headers.get('Content-Type')?.startsWith('image/')) {
-                    return r.blob();
-                }
-                throw new Error(`HTTP ${r.status} - Not an image`);
+                if (r.ok && r.headers.get('Content-Type')?.startsWith('image/')) return r.blob();
+                throw new Error('Not an image');
             })
             .then(blob => {
-                console.log('Got image blob:', blob.size, 'bytes');
                 const objUrl = URL.createObjectURL(blob);
                 const img = document.createElement('img');
                 img.className = 'product-card-image';
                 img.alt = col.dataset.productName || 'Product image';
-                img.onload = () => {
-                    console.log('Image loaded successfully');
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(img);
-                    URL.revokeObjectURL(objUrl);
-                };
-                img.onerror = (e) => {
-                    console.error('Image element load error:', e);
-                    wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
-                    URL.revokeObjectURL(objUrl);
-                };
+                img.onload = () => { wrapper.innerHTML = ''; wrapper.appendChild(img); URL.revokeObjectURL(objUrl); };
+                img.onerror = () => { wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>'; URL.revokeObjectURL(objUrl); };
                 img.src = objUrl;
             })
-            .catch((err) => {
-                console.error('Image fetch error:', err);
-                wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>';
+            .catch(() => { wrapper.innerHTML = '<div class="placeholder-image no-image">No image</div>'; });
+    };
+
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    loadImage(entry.target);
+                    observer.unobserve(entry.target);
+                }
             });
-    });
+        }, { rootMargin: '200px' });
+        cols.forEach(col => {
+            if (col.querySelector('.product-card-image-wrapper')?.dataset.loaded !== 'true') {
+                observer.observe(col);
+            }
+        });
+    } else {
+        cols.forEach(loadImage);
+    }
 }
 
 function renderTagPills(tags) {
@@ -600,6 +753,9 @@ function renderSparklines() {
             canvas.style.display = 'none';
             return;
         }
+        // Destroy any existing chart on this canvas before creating a new one
+        const existing = Chart.getChart(canvas);
+        if (existing) existing.destroy();
         const first = prices[0], last = prices[prices.length - 1];
         const color = last < first ? '#10b981' : last > first ? '#ef4444' : '#6b7280';
         const ctx = canvas.getContext('2d');
@@ -643,7 +799,7 @@ function renderProductRow(product) {
             class="hover:bg-gray-700">
             <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]"><a href="${historyUrl}" class="text-primary-400 hover:text-primary-300 font-medium">${product.name}</a></td>
             <td class="px-6 py-4 whitespace-normal break-all align-top"><a href="${product.url}" target="_blank" class="text-gray-400 hover:text-gray-300 underline">${merchant}</a></td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-white align-top">${formatPriceCell(product)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-white align-top">${formatPriceCell(product)}${(() => { const d = getDiscountPercent(product); return d ? ` <span class="discount-badge">${d}% off</span>` : ''; })()}</td>
             <td class="px-6 py-4 whitespace-nowrap align-top"><canvas class="sparkline" data-url="${encodeURIComponent(product.url)}" width="80" height="30"></canvas></td>
             <td class="px-6 py-4 whitespace-normal align-top text-sm">
                 <div class="flex gap-2 flex-wrap">${statusBadge} ${enabledBadge} ${renderTagPills(product.tags)}</div>
@@ -667,14 +823,8 @@ function sortTable(column) {
         sortDesc = false;
     }
     
-    // Update sort icons
-    document.getElementById('sort-name-icon').textContent = '⬍';
-    document.getElementById('sort-merchant-icon').textContent = '⬍';
-    document.getElementById('sort-price-icon').textContent = '⬍';
-    
-    const icon = sortDesc ? '▼' : '▲';
-    document.getElementById(`sort-${column}-icon`).textContent = icon;
-    
+    updateSortIcons();
+    saveFilterState();
     renderProducts();
 }
 
@@ -739,13 +889,15 @@ function renderProducts() {
         }
     } else {
         document.getElementById('empty-state').style.display = 'none';
+        const visible = filtered.slice(0, displayLimit);
+        const hasMore = filtered.length > displayLimit;
         if (currentView === 'table') {
             tableContainer.style.display = 'block';
             cardsContainerWrapper.style.display = 'none';
             // Build table rows with group collapsing
             const rows = [];
             const renderedGroups = new Set();
-            filtered.forEach(p => {
+            visible.forEach(p => {
                 const gKey = URL_TO_GROUP[p.url];
                 if (gKey) {
                     const primaryUrl = GROUP_PRIMARY_URL[gKey];
@@ -755,22 +907,49 @@ function renderProducts() {
                             rows.push(renderGroupParentRow(group));
                             renderedGroups.add(gKey);
                         } else {
-                            // Fallback to single row if group missing
                             rows.push(renderProductRow(p));
                         }
-                    } else {
-                        // Skip non-primary group members to avoid duplicates
                     }
                 } else {
                     rows.push(renderProductRow(p));
                 }
             });
             tbody.innerHTML = rows.join('');
+            // Show More button for table
+            let showMoreEl = document.getElementById('table-show-more');
+            if (hasMore) {
+                if (!showMoreEl) {
+                    showMoreEl = document.createElement('button');
+                    showMoreEl.id = 'table-show-more';
+                    showMoreEl.className = 'show-more-btn';
+                    tableContainer.querySelector('.bg-gray-800').appendChild(showMoreEl);
+                }
+                showMoreEl.textContent = `Show more (${displayLimit} of ${filtered.length})`;
+                showMoreEl.style.display = '';
+                showMoreEl.onclick = () => { displayLimit += 50; renderProducts(); };
+            } else if (showMoreEl) {
+                showMoreEl.style.display = 'none';
+            }
         } else {
             tableContainer.style.display = 'none';
             cardsContainerWrapper.style.display = 'block';
-            cardsContainer.innerHTML = filtered.map(renderProductCard).join('');
-            // Load images after cards are rendered
+            cardsContainer.innerHTML = visible.map(renderProductCard).join('');
+            // Show More button for cards
+            let showMoreEl = document.getElementById('cards-show-more');
+            if (hasMore) {
+                if (!showMoreEl) {
+                    showMoreEl = document.createElement('button');
+                    showMoreEl.id = 'cards-show-more';
+                    showMoreEl.className = 'show-more-btn mt-4';
+                    cardsContainerWrapper.appendChild(showMoreEl);
+                }
+                showMoreEl.textContent = `Show more (${displayLimit} of ${filtered.length})`;
+                showMoreEl.style.display = '';
+                showMoreEl.onclick = () => { displayLimit += 50; renderProducts(); };
+            } else if (showMoreEl) {
+                showMoreEl.style.display = 'none';
+            }
+            // Lazy-load images after cards are rendered
             setTimeout(() => loadCardImages(), 100);
         }
     }
@@ -797,9 +976,9 @@ function setView(view) {
 function loadProducts() {
     // Fetch products, alerts, and sparkline history in parallel
     Promise.all([
-        fetch('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
-        fetch('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts')),
-        fetch('/api/history/all?days=7').then(r => r.ok ? r.json() : []).catch(() => [])
+        fetchWithTimeout('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
+        fetchWithTimeout('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts')),
+        fetchWithTimeout('/api/history/all?days=7').then(r => r.ok ? r.json() : []).catch(() => [])
     ])
     .then(([productsResp, alerts, historyData]) => {
         allProducts = Array.isArray(productsResp) ? productsResp : (productsResp.items || []);
@@ -840,6 +1019,14 @@ function loadProducts() {
         renderSparklines();
         updateLastUpdate(allProducts);
         populateTagsFilter(allProducts);
+        populateTrendTagFilter();
+        // Restore pending tag filter from localStorage
+        const tf = document.getElementById('tags-filter');
+        if (tf && tf.dataset.pendingTag) {
+            tf.value = tf.dataset.pendingTag;
+            delete tf.dataset.pendingTag;
+            renderProducts();
+        }
     })
     .catch(error => {
         document.getElementById('loading').style.display = 'none';
@@ -866,7 +1053,7 @@ function loadTrends() {
     const emptyDiv = document.getElementById('trends-empty');
     const canvas = document.getElementById('trends-chart');
     
-    fetch(`/api/history/all?days=${days}`)
+    fetchWithTimeout(`/api/history/all?days=${days}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: Failed to fetch trends`);
@@ -877,7 +1064,21 @@ function loadTrends() {
             const seriesList = Array.isArray(data) ? data : (data.items || []);
             if (trendsChart) { trendsChart.destroy(); trendsChart = null; }
 
-            if (!seriesList || seriesList.length === 0) {
+            // Filter series by trend tag filter
+            const trendTagFilter = (document.getElementById('trend-tag-filter') || {}).value || '';
+            let filteredSeries = seriesList;
+            if (trendTagFilter === '__changed__') {
+                filteredSeries = seriesList.filter(item => {
+                    if (!item.series || item.series.length < 2) return false;
+                    const prices = item.series.map(p => p.price_in_base != null ? Number(p.price_in_base) : Number(p.price)).filter(v => !isNaN(v));
+                    return prices.length >= 2 && new Set(prices).size > 1;
+                });
+            } else if (trendTagFilter) {
+                const tagProducts = new Set((allProducts || []).filter(p => (p.tags || []).includes(trendTagFilter)).map(p => p.url));
+                filteredSeries = seriesList.filter(item => tagProducts.has(item.url));
+            }
+
+            if (!filteredSeries || filteredSeries.length === 0) {
                 emptyDiv.style.display = 'block';
                 canvas.style.display = 'none';
                 return;
@@ -886,7 +1087,7 @@ function loadTrends() {
             canvas.style.display = 'block';
             
             // Extract and deduplicate timestamps (keeping full precision for intra-day trends)
-            const allTimestamps = uniq(seriesList.flatMap(item => 
+            const allTimestamps = uniq(filteredSeries.flatMap(item => 
                 item.series.map(p => {
                     try {
                         const d = new Date(p.timestamp);
@@ -912,9 +1113,9 @@ function loadTrends() {
                 }
             });
             
-            console.log('Trends data:', { seriesCount: seriesList.length, timestampCount: allTimestamps.length, spansDays, times: allTimestamps.slice(-5) });
+            console.log('Trends data:', { seriesCount: filteredSeries.length, timestampCount: allTimestamps.length, spansDays, times: allTimestamps.slice(-5) });
 
-            const datasets = seriesList.map((item, idx) => {
+            const datasets = filteredSeries.map((item, idx) => {
                 const timeMap = {};
                 item.series.forEach(p => {
                     try {
@@ -1066,7 +1267,13 @@ function loadTrends() {
                 return { size: isMobile() ? 12 : 14 };
             }
 
-            // Build custom HTML legend
+            // Restore hidden state from previous selection & build legend
+            trendsChart.data.datasets.forEach((ds, i) => {
+                if (hiddenTrendLabels.has(ds.label)) {
+                    trendsChart.getDatasetMeta(i).hidden = true;
+                }
+            });
+            trendsChart.update('none');
             renderTrendsLegend(trendsChart);
         })
         .catch(err => {
@@ -1102,10 +1309,15 @@ function renderTrendsLegend(chart) {
         item.appendChild(chip);
         item.appendChild(label);
 
+        // Reflect current hidden state
+        const isHidden = chart.getDatasetMeta(idx).hidden;
+        if (isHidden) item.classList.add('hidden-dataset');
+
         item.addEventListener('click', () => {
             const meta = chart.getDatasetMeta(idx);
             meta.hidden = !meta.hidden;
             item.classList.toggle('hidden-dataset', meta.hidden);
+            if (meta.hidden) { hiddenTrendLabels.add(ds.label); } else { hiddenTrendLabels.delete(ds.label); }
             chart.update();
         });
 
@@ -1114,15 +1326,17 @@ function renderTrendsLegend(chart) {
 
     // All / None buttons
     document.getElementById('legend-all-btn').onclick = () => {
-        chart.data.datasets.forEach((_, i) => {
+        chart.data.datasets.forEach((ds, i) => {
             chart.getDatasetMeta(i).hidden = false;
+            hiddenTrendLabels.delete(ds.label);
         });
         container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.remove('hidden-dataset'));
         chart.update();
     };
     document.getElementById('legend-none-btn').onclick = () => {
-        chart.data.datasets.forEach((_, i) => {
+        chart.data.datasets.forEach((ds, i) => {
             chart.getDatasetMeta(i).hidden = true;
+            hiddenTrendLabels.add(ds.label);
         });
         container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.add('hidden-dataset'));
         chart.update();
@@ -1134,7 +1348,7 @@ function deleteProduct(url, name) {
         return;
     }
     
-    fetch('/api/product/delete', {
+    fetchWithTimeout('/api/product/delete', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
@@ -1164,7 +1378,7 @@ function checkPrice(url, btn) {
     btn.disabled = true;
     btn.innerHTML = '⏳ Checking...';
     
-    fetch('/api/product/check', {
+    fetchWithTimeout('/api/product/check', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: url})
@@ -1186,8 +1400,19 @@ function checkPrice(url, btn) {
                 ? ` (~$${Number(result.price_in_base).toFixed(2)} ${baseCur})`
                 : '';
             showSuccess(`Price updated: ${base}${suffix}`);
-            loadProducts();
-            // updateLastUpdate will be called inside loadProducts after fetch
+            // Patch the single product in-place instead of full reload
+            const idx = allProducts.findIndex(p => p.url === url);
+            if (idx !== -1) {
+                allProducts[idx].current_price = result.price;
+                allProducts[idx].currency = result.currency || allProducts[idx].currency;
+                if (result.price_in_base != null) allProducts[idx].price_in_base = result.price_in_base;
+                allProducts[idx].last_checked = result.last_checked || new Date().toISOString();
+                renderProducts();
+                renderSparklines();
+                updateLastUpdate(allProducts);
+            } else {
+                loadProducts();
+            }
         }
         btn.disabled = false;
         btn.innerHTML = originalHtml;
@@ -1210,7 +1435,7 @@ function checkGroupPrices(btn, groupKey) {
     let errors = 0;
     
     Promise.allSettled(urls.map(url =>
-        fetch('/api/product/check', {
+        fetchWithTimeout('/api/product/check', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({url: url})
@@ -1311,7 +1536,7 @@ function populateTagsFilter(products) {
 }
 
 function loadHealthWidget() {
-    fetch('/api/health/detailed')
+    fetchWithTimeout('/api/health/detailed')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
             if (!data) return;
@@ -1401,7 +1626,7 @@ function buildGroupLookups(groups) {
 }
 
 function loadGroups() {
-    return fetch('/api/compare/groups')
+    return fetchWithTimeout('/api/compare/groups')
         .then(r => {
             if (!r.ok) throw new Error('Failed to fetch groups');
             return r.json();
@@ -1503,28 +1728,38 @@ function toggleGroupRows(id) {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
+    // Restore saved filter/sort state
+    restoreFilterState();
+    
     // Initialize view buttons
     setView(currentView);
     
     document.getElementById('view-table-btn').addEventListener('click', () => setView('table'));
     document.getElementById('view-cards-btn').addEventListener('click', () => setView('cards'));
     
-    document.getElementById('search-input').addEventListener('input', renderProducts);
-    document.getElementById('status-filter').addEventListener('change', renderProducts);
+    // Debounced search
+    const debouncedRender = debounce(() => { saveFilterState(); renderProducts(); }, 300);
+    document.getElementById('search-input').addEventListener('input', debouncedRender);
+    document.getElementById('status-filter').addEventListener('change', () => { saveFilterState(); renderProducts(); });
     const tagsFilter = document.getElementById('tags-filter');
-    if (tagsFilter) tagsFilter.addEventListener('change', renderProducts);
+    if (tagsFilter) tagsFilter.addEventListener('change', () => { saveFilterState(); renderProducts(); });
     document.getElementById('trend-days').addEventListener('change', loadTrends);
     const modeSel = document.getElementById('trend-mode');
     if (modeSel) modeSel.addEventListener('change', loadTrends);
     const curSel = document.getElementById('trend-currency');
     if (curSel) curSel.addEventListener('change', loadTrends);
+    const trendTagSel = document.getElementById('trend-tag-filter');
+    if (trendTagSel) trendTagSel.addEventListener('change', loadTrends);
+    // Export CSV button
+    const exportBtn = document.getElementById('export-csv-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportCSV);
     const updateAllBtn = document.getElementById('update-all-btn');
     if (updateAllBtn) {
         updateAllBtn.addEventListener('click', () => {
             updateAllBtn.disabled = true;
             const original = updateAllBtn.innerHTML;
             updateAllBtn.innerHTML = '⏳ Updating...';
-            fetch('/api/products/check-all', { method: 'POST' })
+            fetchWithTimeout('/api/products/check-all', { method: 'POST' }, 120000)
                 .then(r => r.json().then(j => ({ok: r.ok, data: j})))
                 .then(({ok, data}) => {
                     if (!ok || data.error) {
