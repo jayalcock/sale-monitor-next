@@ -111,6 +111,7 @@
                 </div>
             </div>
             <div class="mt-4 chart-responsive-wrapper">
+                <div id="trends-chart-loader" class="chart-loader"><div class="chart-loader-spinner"></div></div>
                 <canvas id="trends-chart"></canvas>
             </div>
             <div id="trends-empty" class="mt-4 text-center text-gray-400 text-sm" style="display:none;">No history available yet.</div>
@@ -1010,6 +1011,7 @@ function loadTrends() {
     const currencyMode = curSel ? curSel.value : 'base';
     const emptyDiv = document.getElementById('trends-empty');
     const canvas = document.getElementById('trends-chart');
+    document.getElementById('trends-chart-loader')?.classList.remove('hidden');
     
     fetchWithTimeout(`/api/history/all?days=${days}`)
         .then(response => {
@@ -1039,6 +1041,7 @@ function loadTrends() {
             if (!filteredSeries || filteredSeries.length === 0) {
                 emptyDiv.style.display = 'block';
                 canvas.style.display = 'none';
+                document.getElementById('trends-chart-loader')?.classList.add('hidden');
                 return;
             }
             emptyDiv.style.display = 'none';
@@ -1233,12 +1236,14 @@ function loadTrends() {
             });
             trendsChart.update('none');
             renderTrendsLegend(trendsChart);
+            document.getElementById('trends-chart-loader')?.classList.add('hidden');
         })
         .catch(err => {
             const emptyDiv = document.getElementById('trends-empty');
             emptyDiv.textContent = 'Unable to load trends.';
             emptyDiv.style.display = 'block';
             document.getElementById('trends-legend-wrapper').style.display = 'none';
+            document.getElementById('trends-chart-loader')?.classList.add('hidden');
         });
 }
 
