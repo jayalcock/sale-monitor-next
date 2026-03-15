@@ -327,12 +327,24 @@ let GROUP_PRIMARY_URL = {}; // group_key -> primary url (lowest priced)
 
 function buildSearchQuery(product) {
     const id = product.identifiers || {};
-    if (id.mpn) return id.mpn;
-    if (id.sku) return id.sku;
-    if (id.gtin || id.gtin13) return id.gtin || id.gtin13;
-    if (id.brand && id.model) return id.brand + ' ' + id.model;
-    if (id.brand && id.name) return id.brand + ' ' + id.name;
-    return product.name;
+    const merchant = getMerchant(product);
+    const brand = id.brand || '';
+
+    // The extracted "name" from identifiers is sometimes just the store name
+    // (e.g. "Steed Cycles", "Curve Cycling") — detect and ignore those.
+    const idName = id.name || '';
+    const nameIsStoreName = idName && merchant &&
+        merchant.toLowerCase().replace(/[^a-z]/g, '').includes(idName.toLowerCase().replace(/[^a-z]/g, ''));
+    const usableIdName = idName && !nameIsStoreName ? idName : '';
+
+    // Pick the best product name: structured data name > user-entered name
+    const productName = usableIdName || product.name;
+
+    // If we have a brand and the product name doesn't already start with it, prepend it
+    if (brand && !productName.toLowerCase().startsWith(brand.toLowerCase())) {
+        return brand + ' ' + productName;
+    }
+    return productName;
 }
 
 function googleShoppingUrl(product) {
