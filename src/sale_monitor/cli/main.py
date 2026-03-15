@@ -38,7 +38,11 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
     max_workers = min(4, len(enabled)) if enabled else 1
 
     def _extract(p):
-        return p, extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
+        result = extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
+        # Capture identifiers immediately — the shared extractor attribute gets
+        # overwritten by the next thread, so we snapshot it here.
+        identifiers = dict(getattr(extractor, 'last_identifiers', None) or {})
+        return p, result, identifiers
 
     extraction_results = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -49,11 +53,11 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
             except Exception as e:
                 p = future_to_product[future]
                 logging.error(f"{p.name}: extraction thread error: {e}")
-                extraction_results.append((p, (None, None, None)))
+                extraction_results.append((p, (None, None, None), {}))
 
     # Phase 2: Process results sequentially (state updates, notifications)
     updated = 0
-    for p, (price, selector_source, detected_currency) in extraction_results:
+    for p, (price, selector_source, detected_currency), new_identifiers in extraction_results:
         if price is None:
             logging.warning(f"{p.name}: price not found")
             # Record failure in history for alerts tracking
@@ -83,7 +87,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None):
         old_price = rec.get("current_price")
 
         # Extract identifiers from current scrape
-        new_identifiers = getattr(extractor, 'last_identifiers', {}) or {}
+        # (new_identifiers was captured per-thread during Phase 1)
         # Preserve existing identifiers and group_key, merge with new ones
         preserved_identifiers = rec.get('identifiers', {})
         merged_identifiers = {**preserved_identifiers, **new_identifiers} if new_identifiers else preserved_identifiers
