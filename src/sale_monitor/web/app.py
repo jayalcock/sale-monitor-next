@@ -1432,28 +1432,28 @@ def create_app():
             except (OSError, ValueError):
                 name_by_url = {}
 
-            # Get list of products that have any history
-            db_products = history.get_all_products()  # List[Tuple[url, name]]
-            
-            # If DB has no history but we have products, use those to enable fallback synthesis
-            if not db_products and name_by_url:
-                products = [(url, name) for url, name in name_by_url.items()]
-            else:
-                products = db_products
-            
-            result = []
-            seen_urls = set()
+            # Restrict to current product URLs when available
+            url_filter = set(name_by_url.keys()) if name_by_url else None
 
-            for url, name in products:
-                # If we have a current CSV mapping, restrict to those URLs only
+            # Single bulk query for all products' history
+            all_history = history.get_all_history_extended(days=days, url_filter=url_filter)
+
+            # Downsample for large date ranges (> 30 days): keep one record per
+            # product per day (latest successful) to reduce payload size.
+            downsample = days > 30
+
+            result = []
+            # If DB has no history but we have products, try state fallback
+            urls_to_process = set(all_history.keys())
+            if name_by_url:
+                urls_to_process |= set(name_by_url.keys())
+
+            for url in urls_to_process:
                 if name_by_url and url not in name_by_url:
                     continue
-                # Deduplicate by URL in case DB has multiple names over time
-                if url in seen_urls:
-                    continue
-                records = history.get_history_extended(url, days=days)
+                records = all_history.get(url)
                 if not records:
-                    # Fallback: synthesize a single point from current state so trends don't go blank
+                    # Fallback: synthesize a single point from current state
                     try:
                         st = load_state(flask_app.config['STATE_FILE']).get(url)
                         if st and 'current_price' in st:
@@ -1466,25 +1466,38 @@ def create_app():
                             continue
                     except (ValueError, TypeError, sqlite3.Error, requests.exceptions.RequestException):
                         continue
-                # Choose display name: prefer CSV; else DB unless it looks numeric -> fallback to URL
-                display_name = name_by_url.get(url, name)
+                # Choose display name: prefer CSV; else DB name from records
+                display_name = name_by_url.get(url, url)
                 try:
-                    # If display_name is numeric-like (legacy bug), fallback to CSV or URL
                     if display_name is not None and str(display_name).strip() != "":
                         _ = float(str(display_name))
-                        # numeric, so replace
                         display_name = name_by_url.get(url, url)
                 except ValueError:
                     pass
-                series = []
-                for (ts, price, status, currency, _) in records:
-                    if status != 'success':
-                        continue
 
-                    # Compute price in configured base currency
+                # Build series, optionally downsampling to one point per day
+                if downsample:
+                    # Keep latest success per day
+                    day_best = {}
+                    for (ts, price, status, currency, _) in records:
+                        if status != 'success' or price is None:
+                            continue
+                        day = ts[:10]
+                        if day not in day_best:
+                            day_best[day] = (ts, price, currency)
+                    day_records = sorted(day_best.values(), key=lambda r: r[0])
+                else:
+                    day_records = [
+                        (ts, price, currency)
+                        for (ts, price, status, currency, _) in records
+                        if status == 'success' and price is not None
+                    ]
+
+                series = []
+                for (ts, price, currency) in day_records:
                     price_in_base = None
                     try:
-                        if price is not None and currency:
+                        if currency:
                             if currency.upper() == base_currency:
                                 price_in_base = price
                             else:
@@ -1493,7 +1506,6 @@ def create_app():
                     except (ValueError, TypeError):
                         pass
 
-                    # Round to 2 decimals
                     try:
                         if price_in_base is not None:
                             price_in_base = round(float(price_in_base), 2)
@@ -1514,7 +1526,6 @@ def create_app():
                     'name': display_name,
                     'series': series
                 })
-                seen_urls.add(url)
 
             return jsonify(_paginate(result))
         except (OSError, ValueError, sqlite3.Error) as e:

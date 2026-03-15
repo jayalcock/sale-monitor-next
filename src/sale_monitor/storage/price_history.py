@@ -267,6 +267,46 @@ class PriceHistory:
             """)
             return cursor.fetchall()
 
+    def get_all_history_extended(
+        self,
+        days: Optional[int] = None,
+        url_filter: Optional[set] = None,
+    ) -> dict:
+        """Fetch history for all products in a single query.
+
+        Args:
+            days: Restrict to records within the last N days.
+            url_filter: If provided, only include these URLs.
+
+        Returns:
+            dict mapping product_url -> list of (timestamp, price, status, currency, price_cad) tuples,
+            ordered newest-first per product.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+                SELECT product_url, timestamp, price, check_status, currency, price_cad
+                FROM price_history
+            """
+            params: list = []
+
+            if days is not None:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                query += " WHERE timestamp >= ?"
+                params.append(cutoff)
+
+            query += " ORDER BY product_url, timestamp DESC"
+
+            cursor = conn.execute(query, params)
+
+            result: dict = {}
+            for row in cursor:
+                url = row[0]
+                if url_filter is not None and url not in url_filter:
+                    continue
+                result.setdefault(url, []).append((row[1], row[2], row[3], row[4], row[5]))
+
+            return result
+
     def get_price_changes(
         self, 
         product_url: str, 
