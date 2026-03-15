@@ -83,27 +83,30 @@
     </div>
 </div>
 
-<!-- Competitive Groups (compact) -->
+<!-- Competitive Groups -->
 <div id="groups-section" class="mt-8 px-4 sm:px-0" style="display:none;">
     <div class="bg-gray-800 shadow rounded-lg border border-gray-700">
         <div class="px-4 py-5 sm:p-6">
             <div class="sm:flex sm:items-center sm:justify-between">
                 <h3 class="text-lg leading-6 font-medium text-white">Competitive Groups</h3>
-                <a href="/compare" class="text-primary-400 hover:text-primary-300 text-sm">See all</a>
+                <a href="/compare" class="text-primary-400 hover:text-primary-300 text-sm">View all &rarr;</a>
             </div>
-            <div id="groups-error" class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700" role="alert" style="display:none;">
+            <div id="groups-error" class="mt-3 rounded-md bg-red-900/40 border border-red-700 p-3 text-sm text-red-200" role="alert" style="display:none;">
                 Unable to load competitive groups.
             </div>
             <div id="groups-empty" class="mt-3 text-sm text-gray-400" style="display:none;">
-                No competitive groups yet. Try linking on the Compare page.
+                No competitive groups yet. Add a <strong>group</strong> slug to products on the <a href="/manage" class="text-primary-400 hover:text-primary-300 underline">Manage</a> page.
             </div>
-            <div id="groups-list" class="mt-4 divide-y divide-gray-700"></div>
+            <div id="groups-list" class="mt-4 space-y-3"></div>
         </div>
     </div>
     <style>
-    /* Compact group list styles */
-    .group-row:hover { background-color: #374151; }
-    .price-pill { background:#111827; border:1px solid #374151; color:#e5e7eb; border-radius:0.375rem; padding:0.125rem 0.5rem; font-size:0.875rem; }
+    .group-card { border-radius: 0.5rem; overflow: hidden; transition: border-color 0.15s; }
+    .group-card:hover { border-color: #6366f1; }
+    .vendor-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+    .vendor-bar:not(:last-child) { border-bottom: 1px solid #1f2937; }
+    .vendor-bar.is-lowest { background: rgba(16, 185, 129, 0.08); }
+    .savings-badge { background: #065f46; color: #6ee7b7; font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
     </style>
 </div>
 
@@ -1112,27 +1115,62 @@ function computeGroupMetrics(group) {
 function renderGroupRow(group) {
     const m = computeGroupMetrics(group);
     const title = (group.items && group.items[0] && group.items[0].name) ? group.items[0].name : group.group_key || 'Group';
-    const vendorBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">${m.count} vendors</span>`;
-    let rightHtml = '<span class="text-gray-400">No prices yet</span>';
-    if (m.lowest && m.highest) {
-        const lowStr = formatBasePrice(m.lowest._pb);
-        const hiStr = formatBasePrice(m.highest._pb);
-        const spr = (m.spread != null) ? `$${m.spread.toFixed(2)} ${CURRENT_BASE_CURRENCY}` : '';
-        const lowMerchant = getMerchant(m.lowest);
-        rightHtml = `
-            <div class="flex items-center gap-3 flex-wrap justify-end">
-                <a href="${m.lowest.url}" target="_blank" class="price-pill" title="Lowest merchant">Lowest: ${lowStr} · ${lowMerchant}</a>
-                <span class="price-pill" title="Highest among priced">Highest: ${hiStr}</span>
-                <span class="price-pill" title="Price spread in base">Spread: ${spr}</span>
-            </div>`;
+    const sourceBadge = group.source === 'csv'
+        ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-900/60 text-indigo-300 border border-indigo-700">CSV</span>'
+        : group.source === 'manual'
+        ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700">Manual</span>'
+        : '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-700 text-gray-300 border border-gray-600">Auto</span>';
+
+    // Build vendor bars
+    let vendorsHtml = '';
+    if (m.pricedCount > 0) {
+        const items = (group.items || []).map(it => ({...it, _pb: (it.price_in_base != null ? Number(it.price_in_base) : NaN)}));
+        const priced = items.filter(it => !isNaN(it._pb)).sort((a,b) => a._pb - b._pb);
+        const lowestPb = priced.length > 0 ? priced[0]._pb : null;
+
+        vendorsHtml = priced.slice(0, 5).map((it, idx) => {
+            const merchant = getMerchant(it);
+            const isLowest = idx === 0;
+            const priceStr = `$${it._pb.toFixed(2)} ${CURRENT_BASE_CURRENCY || 'CAD'}`;
+            const nativeStr = (it.currency && it.currency !== (CURRENT_BASE_CURRENCY || 'CAD') && it.current_price != null)
+                ? `<span class="text-gray-500 text-xs ml-1">(${it.currency} $${Number(it.current_price).toFixed(2)})</span>` : '';
+            const savingsHtml = (!isLowest && lowestPb != null && it._pb > lowestPb)
+                ? `<span class="savings-badge">+$${(it._pb - lowestPb).toFixed(2)}</span>` : '';
+            const lowestMark = isLowest ? '<span class="savings-badge" style="background:#064e3b;">Lowest</span>' : '';
+            return `
+                <div class="vendor-bar ${isLowest ? 'is-lowest' : ''}">
+                    <a href="${it.url}" target="_blank" class="text-sm ${isLowest ? 'text-emerald-300 font-semibold' : 'text-gray-300'} hover:text-primary-300 truncate flex-shrink-0" style="min-width:100px;">${merchant}</a>
+                    <span class="text-sm text-white font-medium whitespace-nowrap">${priceStr}</span>${nativeStr}
+                    ${lowestMark}${savingsHtml}
+                    <span class="flex-1"></span>
+                    <a href="/product/detail?url=${encodeURIComponent(it.url)}" class="text-xs text-gray-500 hover:text-primary-400">History</a>
+                </div>`;
+        }).join('');
+
+        if (priced.length > 5) {
+            vendorsHtml += `<div class="vendor-bar text-xs text-gray-500">+ ${priced.length - 5} more vendor(s)</div>`;
+        }
+    } else {
+        vendorsHtml = '<div class="vendor-bar text-gray-500 text-sm">No prices available yet</div>';
     }
+
+    // Summary line
+    const countStr = `${m.count} vendor${m.count !== 1 ? 's' : ''}`;
+    const spreadStr = (m.spread != null && m.spread > 0) ? ` · $${m.spread.toFixed(2)} spread` : '';
+
     return `
-        <div class="group-row px-2 py-3 flex items-start justify-between">
-            <div class="pr-3">
-                <div class="text-white font-medium line-clamp-2">${escapeHtml(String(title))}</div>
-                <div class="mt-1 text-sm text-gray-400">${vendorBadge}</div>
+        <div class="group-card bg-gray-900 border border-gray-700">
+            <div class="flex items-center justify-between px-3 py-2.5 bg-gray-900 border-b border-gray-700">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-white font-medium text-sm truncate">${escapeHtml(String(title))}</span>
+                    ${sourceBadge}
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0 text-xs text-gray-400">
+                    <span>${countStr}${spreadStr}</span>
+                    <a href="/compare" class="text-primary-400 hover:text-primary-300">Compare</a>
+                </div>
             </div>
-            <div class="pl-3 text-sm">${rightHtml}</div>
+            <div>${vendorsHtml}</div>
         </div>
     `;
 }
@@ -1147,7 +1185,13 @@ function renderCompetitiveGroups(groups) {
     emptyEl.style.display = 'none';
 
     if (!Array.isArray(groups) || groups.length === 0) {
-        section.style.display = 'none';
+        section.style.display = 'block';
+        emptyEl.style.display = 'block';
+        list.innerHTML = '';
+        // Initialize empty lookups
+        GROUPS = [];
+        URL_TO_GROUP = {};
+        GROUP_PRIMARY_URL = {};
         return;
     }
 
@@ -1174,7 +1218,6 @@ function renderCompetitiveGroups(groups) {
     URL_TO_GROUP = {};
     GROUP_PRIMARY_URL = {};
     groups.forEach(g => {
-        // pick lowest priced as primary; fallback to first
         const m = computeGroupMetrics(g);
         const primaryUrl = (m.lowest && m.lowest.url) || (g.items && g.items[0] && g.items[0].url) || null;
         if (primaryUrl) GROUP_PRIMARY_URL[g.group_key] = primaryUrl;
