@@ -1208,6 +1208,44 @@ function loadTrends() {
                     },
                     // Let plugin decide active element; keep nearest without requiring intersection
                     interaction: { mode: 'nearest', intersect: false },
+                    onClick: (evt, elements, chart) => {
+                        if (!elements || !elements.length) return;
+                        const clickedIdx = elements[0].datasetIndex;
+                        const total = chart.data.datasets.length;
+                        const visibleCount = chart.data.datasets.filter((_, i) => !chart.getDatasetMeta(i).hidden).length;
+                        const clickedHidden = chart.getDatasetMeta(clickedIdx).hidden;
+                        const container = document.getElementById('trends-legend');
+
+                        if (visibleCount === 1 && !clickedHidden) {
+                            // Only this one visible — restore all
+                            chart.data.datasets.forEach((d, i) => {
+                                chart.getDatasetMeta(i).hidden = false;
+                                hiddenTrendLabels.delete(d.label);
+                            });
+                            if (container) container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.remove('hidden-dataset'));
+                        } else if (visibleCount === total) {
+                            // All visible — solo this one
+                            chart.data.datasets.forEach((d, i) => {
+                                const hide = i !== clickedIdx;
+                                chart.getDatasetMeta(i).hidden = hide;
+                                if (hide) { hiddenTrendLabels.add(d.label); } else { hiddenTrendLabels.delete(d.label); }
+                            });
+                            if (container) container.querySelectorAll('.trends-legend-item').forEach(el => {
+                                el.classList.toggle('hidden-dataset', parseInt(el.dataset.index) !== clickedIdx);
+                            });
+                        } else {
+                            // Some visible — toggle the clicked one
+                            const meta = chart.getDatasetMeta(clickedIdx);
+                            if (!meta.hidden && visibleCount <= 1) { chart.update(); return; }
+                            meta.hidden = !meta.hidden;
+                            if (meta.hidden) { hiddenTrendLabels.add(chart.data.datasets[clickedIdx].label); } else { hiddenTrendLabels.delete(chart.data.datasets[clickedIdx].label); }
+                            if (container) container.querySelectorAll('.trends-legend-item').forEach(el => {
+                                const i = parseInt(el.dataset.index);
+                                el.classList.toggle('hidden-dataset', chart.getDatasetMeta(i).hidden);
+                            });
+                        }
+                        chart.update();
+                    },
                     scales: {
                         x: {
                             grid: {
@@ -1299,17 +1337,17 @@ function renderTrendsLegend(chart) {
         item.addEventListener('click', () => {
             const total = chart.data.datasets.length;
             const visibleCount = chart.data.datasets.filter((_, i) => !chart.getDatasetMeta(i).hidden).length;
-            const isOnlySolo = visibleCount === 1 && !chart.getDatasetMeta(idx).hidden;
+            const clickedHidden = chart.getDatasetMeta(idx).hidden;
 
-            if (isOnlySolo) {
-                // Already solo — restore all
+            if (visibleCount === 1 && !clickedHidden) {
+                // Only this one visible — restore all
                 chart.data.datasets.forEach((d, i) => {
                     chart.getDatasetMeta(i).hidden = false;
                     hiddenTrendLabels.delete(d.label);
                 });
                 container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.remove('hidden-dataset'));
-            } else {
-                // Solo this dataset — hide all others
+            } else if (visibleCount === total) {
+                // All visible — solo this one
                 chart.data.datasets.forEach((d, i) => {
                     const hide = i !== idx;
                     chart.getDatasetMeta(i).hidden = hide;
@@ -1318,6 +1356,14 @@ function renderTrendsLegend(chart) {
                 container.querySelectorAll('.trends-legend-item').forEach(el => {
                     el.classList.toggle('hidden-dataset', parseInt(el.dataset.index) !== idx);
                 });
+            } else {
+                // Some visible — toggle the clicked one
+                const meta = chart.getDatasetMeta(idx);
+                // Don't hide the last visible one
+                if (!meta.hidden && visibleCount <= 1) { chart.update(); return; }
+                meta.hidden = !meta.hidden;
+                item.classList.toggle('hidden-dataset', meta.hidden);
+                if (meta.hidden) { hiddenTrendLabels.add(ds.label); } else { hiddenTrendLabels.delete(ds.label); }
             }
             chart.update();
         });
