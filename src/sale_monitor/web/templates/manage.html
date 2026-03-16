@@ -553,7 +553,7 @@ function renderProductRow(product, index) {
     
     return `
         <tr>
-            <td class="px-4 py-2 align-top"><strong class="text-white">${escapedName}</strong><br><span class="text-gray-400 text-xs">${escapedUrl}</span></td>
+            <td class="px-4 py-2 align-top max-w-[300px]"><strong class="text-white">${escapedName}</strong><br><a href="${escapedUrl}" target="_blank" rel="noopener" class="text-gray-400 text-xs block truncate hover:text-primary-300" title="${escapedUrl}">${escapedUrl}</a></td>
             <td class="px-4 py-2 align-top">${statusBadge}</td>
             <td class="px-4 py-2 align-top">${selectorDisplay}</td>
             <td class="px-4 py-2 align-top">${product.target_price ? '$' + parseFloat(product.target_price).toFixed(2) : '-'}</td>
