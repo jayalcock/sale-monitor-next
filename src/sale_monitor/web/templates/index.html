@@ -704,6 +704,13 @@ function renderTagPills(tags) {
     return tags.map(t => `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-900 text-primary-300">${escapeHtml(t)}</span>`).join('');
 }
 
+function destroyAllSparklines() {
+    document.querySelectorAll('canvas.sparkline').forEach(canvas => {
+        const existing = Chart.getChart(canvas);
+        if (existing) existing.destroy();
+    });
+}
+
 function renderSparklines() {
     document.querySelectorAll('canvas.sparkline').forEach(canvas => {
         const url = decodeURIComponent(canvas.dataset.url);
@@ -827,6 +834,8 @@ function filterAndSortProducts() {
 }
 
 function renderProducts() {
+    // Destroy sparkline Chart instances before replacing DOM
+    destroyAllSparklines();
     const filtered = filterAndSortProducts();
     const tbody = document.getElementById('products-tbody');
     const cardsContainer = document.getElementById('products-cards');
@@ -933,13 +942,12 @@ function setView(view) {
 }
 
 function loadProducts() {
-    // Fetch products, alerts, and sparkline history in parallel
+    // Fetch products and alerts (sparkline data comes from shared history cache)
     Promise.all([
         fetchWithTimeout('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
         fetchWithTimeout('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts')),
-        fetchWithTimeout('/api/history/all?days=7').then(r => r.ok ? r.json() : []).catch(() => [])
     ])
-    .then(([productsResp, alerts, historyData]) => {
+    .then(([productsResp, alerts]) => {
         allProducts = Array.isArray(productsResp) ? productsResp : (productsResp.items || []);
         
         // Build alert lookup map
@@ -949,17 +957,6 @@ function loadProducts() {
                 productAlerts[alert.url] = alert;
             });
         }
-
-        // Build sparkline history map (URL -> array of price_in_base values)
-        sparklineHistory = {};
-        const histList = Array.isArray(historyData) ? historyData : (historyData.items || []);
-        histList.forEach(item => {
-            if (item.url && Array.isArray(item.series) && item.series.length > 1) {
-                sparklineHistory[item.url] = item.series
-                    .map(p => p.price_in_base != null ? Number(p.price_in_base) : (p.price != null ? Number(p.price) : null))
-                    .filter(v => v != null);
-            }
-        });
         
         // Capture base currency from API (same for all products)
         if (allProducts && allProducts.length) {
@@ -1022,6 +1019,19 @@ function loadTrends() {
         })
         .then(data => {
             const seriesList = Array.isArray(data) ? data : (data.items || []);
+
+            // Build sparkline history from the same data (avoids a second API call)
+            sparklineHistory = {};
+            seriesList.forEach(item => {
+                if (item.url && Array.isArray(item.series) && item.series.length > 1) {
+                    sparklineHistory[item.url] = item.series
+                        .map(p => p.price_in_base != null ? Number(p.price_in_base) : (p.price != null ? Number(p.price) : null))
+                        .filter(v => v != null);
+                }
+            });
+            // Re-render sparklines now that data is available
+            renderSparklines();
+
             if (trendsChart) { trendsChart.destroy(); trendsChart = null; }
 
             // Filter series by trend tag filter
@@ -1695,36 +1705,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+function doFullRefresh() {
+    return loadGroups().then(() => {
+        // loadTrends fetches history/all; once done, build sparklines from its data
+        loadTrends();
+        loadProducts();
+        loadHealthWidget();
+    }).catch(err => console.error('Refresh error:', err));
+}
+
 // Initial page load
 window.addEventListener('DOMContentLoaded', () => {
-    // Initial load - sequence to ensure groups ready before products render
-    try {
-        loadGroups().then(() => {
-            loadProducts();
-            loadTrends();
-            loadHealthWidget();
-        }).catch(err => console.error('Initial load error:', err));
-    } catch (e) {
-        console.error('Initial load exception:', e);
-    }
+    try { doFullRefresh(); } catch (e) { console.error('Initial load exception:', e); }
     
-    // Auto-refresh every 60 seconds - same sequence
+    // Auto-refresh every 60 seconds, pausing when tab is hidden
     refreshInterval = setInterval(() => {
-        try {
-            loadGroups().then(() => {
-                loadProducts();
-                loadTrends();
-                loadHealthWidget();
-            }).catch(err => console.error('Refresh error:', err));
-        } catch (e) {
-            console.error('Refresh exception:', e);
-        }
+        if (document.hidden) return;
+        try { doFullRefresh(); } catch (e) { console.error('Refresh exception:', e); }
     }, 60000);
+
+    // When tab becomes visible again after being hidden, refresh immediately
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            try { doFullRefresh(); } catch (e) { console.error('Visibility refresh error:', e); }
+        }
+    });
 });
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (refreshInterval) clearInterval(refreshInterval);
+    destroyAllSparklines();
     if (trendsChart) trendsChart.destroy();
 });
 

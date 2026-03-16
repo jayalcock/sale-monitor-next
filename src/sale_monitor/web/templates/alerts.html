@@ -145,7 +145,7 @@ function loadAlerts() {
 // Initial load
 loadAlerts();
 
-// Auto-refresh every 60 seconds
-setInterval(loadAlerts, 60000);
+// Auto-refresh every 60 seconds, skip when tab hidden
+var _alertsInterval = setInterval(function() { if (!document.hidden) loadAlerts(); }, 60000);
 </script>
 {% endblock %}

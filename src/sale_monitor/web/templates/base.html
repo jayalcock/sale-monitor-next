@@ -282,14 +282,22 @@
         // Update on page load
         updateAlertsBadge();
         
-        // Auto-refresh every 60 seconds
-        setInterval(updateAlertsBadge, 60000);
+        // Auto-refresh every 60 seconds, pausing when tab hidden
+        var _badgeInterval = setInterval(updateAlertsBadge, 60000);
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                clearInterval(_badgeInterval);
+            } else {
+                updateAlertsBadge();
+                _badgeInterval = setInterval(updateAlertsBadge, 60000);
+            }
+        });
         
         // Shared utility functions
+        var _escapeDiv = document.createElement('div');
         function escapeHtml(str) {
-            const d = document.createElement('div');
-            d.textContent = str;
-            return d.innerHTML;
+            _escapeDiv.textContent = str;
+            return _escapeDiv.innerHTML;
         }
         
         function formatPrice(price) {

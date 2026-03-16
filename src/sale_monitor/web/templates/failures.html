@@ -211,7 +211,7 @@ function loadFailures() {
 // Initial load
 loadFailures();
 
-// Auto-refresh every 60 seconds
-setInterval(loadFailures, 60000);
+// Auto-refresh every 60 seconds, skip when tab hidden
+var _failuresInterval = setInterval(function() { if (!document.hidden) loadFailures(); }, 60000);
 </script>
 {% endblock %}
