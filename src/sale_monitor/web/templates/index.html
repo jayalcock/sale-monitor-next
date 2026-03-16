@@ -1049,6 +1049,15 @@ function loadTrends() {
                 filteredSeries = seriesList.filter(item => tagProducts.has(item.url));
             }
 
+            // For grouped products, show only the primary (lowest-priced) member
+            if (Object.keys(URL_TO_GROUP).length > 0) {
+                const primaryUrls = new Set(Object.values(GROUP_PRIMARY_URL));
+                filteredSeries = filteredSeries.filter(item => {
+                    const gk = URL_TO_GROUP[item.url];
+                    return !gk || primaryUrls.has(item.url);
+                });
+            }
+
             if (!filteredSeries || filteredSeries.length === 0) {
                 emptyDiv.style.display = 'block';
                 canvas.style.display = 'none';
@@ -1288,10 +1297,28 @@ function renderTrendsLegend(chart) {
         if (isHidden) item.classList.add('hidden-dataset');
 
         item.addEventListener('click', () => {
-            const meta = chart.getDatasetMeta(idx);
-            meta.hidden = !meta.hidden;
-            item.classList.toggle('hidden-dataset', meta.hidden);
-            if (meta.hidden) { hiddenTrendLabels.add(ds.label); } else { hiddenTrendLabels.delete(ds.label); }
+            const total = chart.data.datasets.length;
+            const visibleCount = chart.data.datasets.filter((_, i) => !chart.getDatasetMeta(i).hidden).length;
+            const isOnlySolo = visibleCount === 1 && !chart.getDatasetMeta(idx).hidden;
+
+            if (isOnlySolo) {
+                // Already solo — restore all
+                chart.data.datasets.forEach((d, i) => {
+                    chart.getDatasetMeta(i).hidden = false;
+                    hiddenTrendLabels.delete(d.label);
+                });
+                container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.remove('hidden-dataset'));
+            } else {
+                // Solo this dataset — hide all others
+                chart.data.datasets.forEach((d, i) => {
+                    const hide = i !== idx;
+                    chart.getDatasetMeta(i).hidden = hide;
+                    if (hide) { hiddenTrendLabels.add(d.label); } else { hiddenTrendLabels.delete(d.label); }
+                });
+                container.querySelectorAll('.trends-legend-item').forEach(el => {
+                    el.classList.toggle('hidden-dataset', parseInt(el.dataset.index) !== idx);
+                });
+            }
             chart.update();
         });
 
