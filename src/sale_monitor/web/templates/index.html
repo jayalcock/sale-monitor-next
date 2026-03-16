@@ -1619,7 +1619,7 @@ function renderGroupParentRow(group) {
             <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]">${toggleBtn}${nameLink}</td>
             <td class="px-6 py-4 whitespace-normal break-all align-top"><span class="text-gray-400">Competitive Group</span></td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white align-top">${lowestStr}</td>
-            <td class="px-6 py-4 whitespace-nowrap align-top"></td>
+            <td class="px-6 py-4 whitespace-nowrap align-top">${primaryUrl ? `<canvas class="sparkline" data-url="${encodeURIComponent(primaryUrl)}" width="80" height="30"></canvas>` : ''}</td>
             <td class="px-6 py-4 whitespace-normal align-top text-sm"><div class="flex gap-2 flex-wrap">${statusBadge}</div></td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
