@@ -719,6 +719,7 @@ function renderSparklines() {
             canvas.style.display = 'none';
             return;
         }
+        canvas.style.display = '';
         // Destroy any existing chart on this canvas before creating a new one
         const existing = Chart.getChart(canvas);
         if (existing) existing.destroy();
@@ -942,12 +943,13 @@ function setView(view) {
 }
 
 function loadProducts() {
-    // Fetch products and alerts (sparkline data comes from shared history cache)
+    // Fetch products, alerts, and sparkline history in parallel
     Promise.all([
         fetchWithTimeout('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
         fetchWithTimeout('/api/alerts').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch alerts')),
+        fetchWithTimeout('/api/history/all?days=7').then(r => r.ok ? r.json() : []).catch(() => [])
     ])
-    .then(([productsResp, alerts]) => {
+    .then(([productsResp, alerts, historyData]) => {
         allProducts = Array.isArray(productsResp) ? productsResp : (productsResp.items || []);
         
         // Build alert lookup map
@@ -957,6 +959,17 @@ function loadProducts() {
                 productAlerts[alert.url] = alert;
             });
         }
+
+        // Build sparkline history map (URL -> array of price_in_base values)
+        sparklineHistory = {};
+        const histList = Array.isArray(historyData) ? historyData : (historyData.items || []);
+        histList.forEach(item => {
+            if (item.url && Array.isArray(item.series) && item.series.length > 1) {
+                sparklineHistory[item.url] = item.series
+                    .map(p => p.price_in_base != null ? Number(p.price_in_base) : (p.price != null ? Number(p.price) : null))
+                    .filter(v => v != null);
+            }
+        });
         
         // Capture base currency from API (same for all products)
         if (allProducts && allProducts.length) {
@@ -1019,18 +1032,6 @@ function loadTrends() {
         })
         .then(data => {
             const seriesList = Array.isArray(data) ? data : (data.items || []);
-
-            // Build sparkline history from the same data (avoids a second API call)
-            sparklineHistory = {};
-            seriesList.forEach(item => {
-                if (item.url && Array.isArray(item.series) && item.series.length > 1) {
-                    sparklineHistory[item.url] = item.series
-                        .map(p => p.price_in_base != null ? Number(p.price_in_base) : (p.price != null ? Number(p.price) : null))
-                        .filter(v => v != null);
-                }
-            });
-            // Re-render sparklines now that data is available
-            renderSparklines();
 
             if (trendsChart) { trendsChart.destroy(); trendsChart = null; }
 

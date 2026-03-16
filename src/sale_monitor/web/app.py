@@ -1442,9 +1442,11 @@ def create_app():
             # Single bulk query for all products' history
             all_history = history.get_all_history_extended(days=days, url_filter=url_filter)
 
-            # Downsample for large date ranges (> 30 days): keep one record per
-            # product per day (latest successful) to reduce payload size.
-            downsample = days > 30
+            # Always downsample to one record per product per day (latest
+            # successful) to keep payloads manageable.  With frequent checks
+            # (~every 2 min) the raw data can be thousands of rows per product
+            # per week, most with identical prices.
+            downsample = True
 
             result = []
             # If DB has no history but we have products, try state fallback

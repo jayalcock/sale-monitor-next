@@ -264,7 +264,9 @@ def test_history_all_deduplicates_by_url(_mock_extract, tmp_path):
     # only one dataset for the URL
     items_for_url = [it for it in data["items"] if it["url"] == url]
     assert len(items_for_url) == 1
-    assert len(items_for_url[0].get("series", [])) >= 2
+    # Downsampling keeps one record per product per day, so both same-day
+    # checks collapse to 1 entry.
+    assert len(items_for_url[0].get("series", [])) >= 1
 
 
 @patch("sale_monitor.services.price_extractor.PriceExtractor.extract_price", return_value=(12.34, 'manual'))
