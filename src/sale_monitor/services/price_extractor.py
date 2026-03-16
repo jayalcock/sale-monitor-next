@@ -134,6 +134,10 @@ class PriceExtractor:
         """
         price, source = self.extract_price(url, selector)
 
+        # Reset per-call state so stale identifiers from a previous product
+        # never leak into the current one.
+        self.last_identifiers = {}
+
         detected_currency: Optional[str] = None
         heuristic_currency: Optional[str] = None
         host_guess_currency: Optional[str] = None
@@ -412,22 +416,27 @@ class PriceExtractor:
         """Extract common product identifiers from HTML content.
 
         Returns a dict containing any of: sku, mpn, gtin, gtin13, brand, model, name.
-        Prefers JSON-LD data; falls back to meta tags when present.
+        Only collects from JSON-LD nodes with @type Product (or its
+        sub-objects like Offer) to avoid picking up Organisation/WebSite noise.
+        Falls back to meta tags when JSON-LD yields nothing.
         """
         result: Dict[str, Any] = {}
         if not html:
             return result
 
-        # 1) JSON-LD blocks
+        # 1) JSON-LD blocks — only walk Product-typed nodes
         for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
             block = m.group(1).strip()
             try:
                 data = json.loads(block)
             except json.JSONDecodeError:
                 continue
-            # Collect known fields recursively
-            self._collect_identifiers_from_json(data, result)
-            # If we have at least one strong identifier, we can stop early
+            # Find Product nodes first, then extract only from those
+            products = self._find_product_nodes(data)
+            for prod in products:
+                self._collect_identifiers_from_product(prod, result)
+                if any(k in result for k in ('mpn', 'sku', 'gtin', 'gtin13')):
+                    break
             if any(k in result for k in ('mpn', 'sku', 'gtin', 'gtin13')):
                 break
 
@@ -447,33 +456,47 @@ class PriceExtractor:
 
         return result
 
-    def _collect_identifiers_from_json(self, obj, out: Dict[str, Any]) -> None:
-        """Walk JSON-LD structures and collect identifiers into 'out'."""
+    def _find_product_nodes(self, obj) -> list:
+        """Return all dicts whose @type is or contains 'Product'."""
+        found: list = []
+        try:
+            if isinstance(obj, dict):
+                t = obj.get('@type', '')
+                types = t if isinstance(t, list) else [t]
+                if any('Product' in str(tp) for tp in types):
+                    found.append(obj)
+                else:
+                    for v in obj.values():
+                        found.extend(self._find_product_nodes(v))
+            elif isinstance(obj, list):
+                for it in obj:
+                    found.extend(self._find_product_nodes(it))
+        except Exception:
+            pass
+        return found
+
+    def _collect_identifiers_from_product(self, obj, out: Dict[str, Any]) -> None:
+        """Extract identifiers from a Product JSON-LD node and its offers."""
         try:
             if isinstance(obj, dict):
                 for key in ('sku', 'mpn', 'gtin', 'gtin13', 'gtin14', 'gtin12'):
                     if key in obj and key not in out and isinstance(obj[key], str):
                         out[key] = obj[key].strip()
-                # brand can be string or object with name
                 if 'brand' in obj and 'brand' not in out:
                     b = obj['brand']
                     if isinstance(b, str):
                         out['brand'] = b.strip()
                     elif isinstance(b, dict) and 'name' in b and isinstance(b['name'], str):
                         out['brand'] = b['name'].strip()
-                # model/name
                 for key in ('model', 'name'):
                     if key in obj and key not in out and isinstance(obj[key], str):
                         out[key] = obj[key].strip()
-                # Nested common keys
-                for k in ('offers', 'Product'):
-                    if k in obj:
-                        self._collect_identifiers_from_json(obj[k], out)
-                for v in obj.values():
-                    self._collect_identifiers_from_json(v, out)
+                # Recurse into offers (Offer / AggregateOffer) but nothing else
+                if 'offers' in obj:
+                    self._collect_identifiers_from_product(obj['offers'], out)
             elif isinstance(obj, list):
                 for it in obj:
-                    self._collect_identifiers_from_json(it, out)
+                    self._collect_identifiers_from_product(it, out)
         except Exception:
             pass
 

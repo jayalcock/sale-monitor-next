@@ -180,3 +180,58 @@ def test_api_products_group_null_when_empty(tmp_path):
     products = client.get("/api/products").get_json()["items"]
 
     assert products[0]["group"] is None
+
+
+def test_manual_link_merges_existing_group(tmp_path):
+    """Linking B↔C when B already belongs to group with A merges all three."""
+    csv = HEADER + (
+        "A,https://a.com/w,,,#p,true,24,,CAD,\n"
+        "B,https://b.com/w,,,#p,true,24,,CAD,\n"
+        "C,https://c.com/w,,,#p,true,24,,CAD,\n"
+    )
+    state = {
+        "https://a.com/w": {"current_price": 10.0, "currency": "CAD", "price_in_base": 10.0, "group_key": "manual:existing"},
+        "https://b.com/w": {"current_price": 20.0, "currency": "CAD", "price_in_base": 20.0, "group_key": "manual:existing"},
+        "https://c.com/w": {"current_price": 30.0, "currency": "CAD", "price_in_base": 30.0},
+    }
+    client = make_client(tmp_path, csv, state)
+
+    # Link B↔C — C should join the existing group that A and B are in
+    resp = client.post("/api/compare/link", json={"urlA": "https://b.com/w", "urlB": "https://c.com/w"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["group_key"] == "manual:existing"
+
+    # All three should be in one group
+    groups = client.get("/api/compare/groups").get_json()["items"]
+    manual_groups = [g for g in groups if g["source"] == "manual"]
+    assert len(manual_groups) == 1
+    urls = {it["url"] for it in manual_groups[0]["items"]}
+    assert urls == {"https://a.com/w", "https://b.com/w", "https://c.com/w"}
+
+
+def test_manual_link_merges_two_existing_groups(tmp_path):
+    """Linking products from two different groups merges all members."""
+    csv = HEADER + (
+        "A,https://a.com/w,,,#p,true,24,,CAD,\n"
+        "B,https://b.com/w,,,#p,true,24,,CAD,\n"
+        "C,https://c.com/w,,,#p,true,24,,CAD,\n"
+        "D,https://d.com/w,,,#p,true,24,,CAD,\n"
+    )
+    state = {
+        "https://a.com/w": {"current_price": 10.0, "currency": "CAD", "price_in_base": 10.0, "group_key": "manual:group1"},
+        "https://b.com/w": {"current_price": 20.0, "currency": "CAD", "price_in_base": 20.0, "group_key": "manual:group1"},
+        "https://c.com/w": {"current_price": 30.0, "currency": "CAD", "price_in_base": 30.0, "group_key": "manual:group2"},
+        "https://d.com/w": {"current_price": 40.0, "currency": "CAD", "price_in_base": 40.0, "group_key": "manual:group2"},
+    }
+    client = make_client(tmp_path, csv, state)
+
+    # Link A↔C — should merge group1 and group2
+    resp = client.post("/api/compare/link", json={"urlA": "https://a.com/w", "urlB": "https://c.com/w"})
+    assert resp.status_code == 200
+
+    groups = client.get("/api/compare/groups").get_json()["items"]
+    manual_groups = [g for g in groups if g["source"] == "manual"]
+    assert len(manual_groups) == 1
+    urls = {it["url"] for it in manual_groups[0]["items"]}
+    assert urls == {"https://a.com/w", "https://b.com/w", "https://c.com/w", "https://d.com/w"}

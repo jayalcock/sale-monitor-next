@@ -630,6 +630,9 @@ def create_app():
                         price_in_base = converted if converted is not None else None
 
                     prev_state = state.get(p.url, {})
+                    new_identifiers = getattr(extractor, 'last_identifiers', {}) or {}
+                    preserved_identifiers = prev_state.get('identifiers') or {}
+                    merged_identifiers = {**preserved_identifiers, **new_identifiers} if new_identifiers else preserved_identifiers
                     state[p.url] = {
                         'current_price': price,
                         'last_checked': datetime.now(timezone.utc).isoformat(),
@@ -638,7 +641,8 @@ def create_app():
                         'currency': currency,
                         'currency_source': currency_source,
                         'price_in_base': price_in_base,
-                        'identifiers': getattr(extractor, 'last_identifiers', {}) or prev_state.get('identifiers')
+                        'identifiers': merged_identifiers,
+                        'group_key': prev_state.get('group_key'),
                     }
                     history.record_price(p.url, p.name, price, status='success', currency=currency, price_cad=price_in_base)
                     updated += 1
@@ -1268,23 +1272,44 @@ def create_app():
         """Link two product URLs under a shared manual group_key.
 
         Body: { urlA, urlB, group_key? }
+
+        If either product already belongs to a manual group, the other product
+        (and all members of its old group, if any) are merged into that group.
+        This keeps groups transitive: linking A↔B then B↔C puts all three
+        under the same key.
         """
         try:
             data = request.get_json() or {}
             urlA = (data.get('urlA') or '').strip()
             urlB = (data.get('urlB') or '').strip()
-            group_key = (data.get('group_key') or '').strip()
+            explicit_key = (data.get('group_key') or '').strip()
             if not urlA or not urlB:
                 return jsonify({'error': 'urlA and urlB required'}), 400
-            # Generate group key if absent
-            if not group_key:
-                # Use normalized name pair hash for stability
-                import hashlib
-                pair = '|'.join(sorted([urlA, urlB]))
-                group_key = 'manual:' + hashlib.sha1(pair.encode('utf-8')).hexdigest()[:8]
+
             state = load_state(flask_app.config['STATE_FILE'])
             a = state.get(urlA, {})
             b = state.get(urlB, {})
+            key_a = a.get('group_key') or ''
+            key_b = b.get('group_key') or ''
+
+            # Decide the canonical group_key: explicit > existing > new hash
+            if explicit_key:
+                group_key = explicit_key
+            elif key_a:
+                group_key = key_a
+            elif key_b:
+                group_key = key_b
+            else:
+                import hashlib
+                pair = '|'.join(sorted([urlA, urlB]))
+                group_key = 'manual:' + hashlib.sha1(pair.encode('utf-8')).hexdigest()[:8]
+
+            # Merge: any product that had the "losing" key gets the winner
+            old_keys = {k for k in (key_a, key_b) if k and k != group_key}
+            for url_key, st in state.items():
+                if isinstance(st, dict) and st.get('group_key') in old_keys:
+                    st['group_key'] = group_key
+
             a['group_key'] = group_key
             b['group_key'] = group_key
             state[urlA] = a
