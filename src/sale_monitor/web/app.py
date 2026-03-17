@@ -2208,12 +2208,29 @@ def create_app():
             _warmup_images_once()
 
     if os.getenv('ENABLE_IMAGE_WARMUP', '1').strip().lower() not in ('0','false','no'):
-        # Only start the warmup thread in one gunicorn worker to avoid
-        # duplicate CPU-intensive image processing across all workers.
+        # Only start the warmup thread once across all gunicorn workers.
+        # os.environ is copied on fork, so we use a file-based guard instead.
         import threading
-        _warmup_started = os.getenv('_IMAGE_WARMUP_STARTED')
-        if not _warmup_started:
-            os.environ['_IMAGE_WARMUP_STARTED'] = '1'
+        from pathlib import Path as _WPath
+        _warmup_flag = _WPath(flask_app.config.get('HISTORY_DB', 'data/history.db')).parent / '.warmup_pid'
+        _should_start = False
+        try:
+            if _warmup_flag.exists():
+                _old_pid = int(_warmup_flag.read_text().strip())
+                # Check if that process is still alive
+                try:
+                    os.kill(_old_pid, 0)
+                except OSError:
+                    _should_start = True  # Old process is dead
+            else:
+                _should_start = True
+        except (ValueError, OSError):
+            _should_start = True
+        if _should_start:
+            try:
+                _warmup_flag.write_text(str(os.getpid()))
+            except OSError:
+                pass
             t = threading.Thread(target=_warmup_loop, name='image-warmup', daemon=True)
             t.start()
     

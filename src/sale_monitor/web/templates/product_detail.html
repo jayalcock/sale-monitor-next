@@ -804,7 +804,7 @@ function loadData() {
 loadData();
 
 // Auto-refresh every 60 seconds, skip when tab hidden
-refreshInterval = setInterval(function() { if (!document.hidden) loadData(); }, 60000);
+refreshInterval = setInterval(function() { if (!document.hidden) loadData(); }, 300000);
 
 // Currency toggle handler
 document.addEventListener('DOMContentLoaded', () => {

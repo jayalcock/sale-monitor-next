@@ -1828,11 +1828,11 @@ function doFullRefresh() {
 window.addEventListener('DOMContentLoaded', () => {
     try { doFullRefresh(); } catch (e) { console.error('Initial load exception:', e); }
     
-    // Auto-refresh every 60 seconds, pausing when tab is hidden
+    // Auto-refresh every 5 minutes, pausing when tab is hidden
     refreshInterval = setInterval(() => {
         if (document.hidden) return;
         try { doFullRefresh(); } catch (e) { console.error('Refresh exception:', e); }
-    }, 60000);
+    }, 300000);
 
     // When tab becomes visible again after being hidden, refresh immediately
     document.addEventListener('visibilitychange', () => {

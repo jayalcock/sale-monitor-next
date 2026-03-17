@@ -415,7 +415,12 @@ def main() -> int:
     try:
         while True:
             schedule.run_pending()
-            time.sleep(30)
+            # Sleep until the next job is due (or 60s max) instead of busy-polling
+            idle = schedule.idle_seconds()
+            if idle is None:
+                time.sleep(60)
+            else:
+                time.sleep(max(1, min(idle, 60)))
     except KeyboardInterrupt:
         logging.info("Scheduler stopped by user")
         return 0

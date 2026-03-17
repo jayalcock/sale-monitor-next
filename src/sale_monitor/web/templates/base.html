@@ -320,14 +320,14 @@
         // Update on page load
         updateAlertsBadge();
         
-        // Auto-refresh every 60 seconds, pausing when tab hidden
-        var _badgeInterval = setInterval(updateAlertsBadge, 60000);
+        // Auto-refresh every 5 minutes, pausing when tab hidden
+        var _badgeInterval = setInterval(updateAlertsBadge, 300000);
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 clearInterval(_badgeInterval);
             } else {
                 updateAlertsBadge();
-                _badgeInterval = setInterval(updateAlertsBadge, 60000);
+                _badgeInterval = setInterval(updateAlertsBadge, 300000);
             }
         });
         

@@ -195,7 +195,7 @@ class PriceHistory:
                     (product_url, product_name, price, timestamp, check_status, currency, price_cad)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (product_url, product_name, price, timestamp, status, cur, price_cad)
+                    (product_url, product_name, price if price is not None else 0, timestamp, status, cur, price_cad)
                 )
                 conn.commit()
 

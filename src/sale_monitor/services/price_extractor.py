@@ -32,6 +32,9 @@ class PriceExtractor:
         self.auto_detector = PriceAutoDetector()
         # Stores last-detected identifiers from HTML (sku/mpn/gtin/brand/model)
         self.last_identifiers: Dict[str, Any] = {}
+        # Cached HTML from the most recent extract_price fetch (avoids double-fetch)
+        self._last_response_html: Optional[str] = None
+        self._last_response_url: Optional[str] = None
 
     def extract_price(self, url: str, selector: str = "") -> Tuple[Optional[float], str]:
         """Extract price from a webpage using CSS selector or auto-detection.
@@ -60,6 +63,10 @@ class PriceExtractor:
                 if resp.status_code != 200:
                     logging.warning("GET %s -> %s", url, resp.status_code)
                     raise requests.RequestException(f"HTTP {resp.status_code}")
+
+                # Cache response for reuse in extract_price_with_currency
+                self._last_response_html = resp.text
+                self._last_response_url = url
                 
                 # Log response size for debugging Amazon blocks
                 if 'amazon' in url.lower():
@@ -153,28 +160,38 @@ class PriceExtractor:
         skip_hosts = {'example.com', 'localhost', '127.0.0.1', '0.0.0.0'}
 
         if not detection_disabled and host not in skip_hosts:
-            try:
-                # Cap detection timeout to 5s to avoid long hangs
-                detection_timeout = min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5
-                resp = self.session.get(url, timeout=detection_timeout)
-                if resp.status_code == 200 and resp.text:
-                    detected_currency = self._detect_currency_from_html(resp.text, url)
+            # Reuse HTML already fetched by extract_price when available
+            html_text = None
+            if self._last_response_html and self._last_response_url == url:
+                html_text = self._last_response_html
+            else:
+                try:
+                    detection_timeout = min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5
+                    resp = self.session.get(url, timeout=detection_timeout)
+                    if resp.status_code == 200:
+                        html_text = resp.text
+                except requests.exceptions.RequestException:
+                    pass
+
+            if html_text:
+                try:
+                    detected_currency = self._detect_currency_from_html(html_text, url)
                     # Also extract identifiers from HTML (JSON-LD/meta common fields)
                     try:
-                        self.last_identifiers = self._extract_identifiers_from_html(resp.text)
+                        self.last_identifiers = self._extract_identifiers_from_html(html_text)
                     except Exception:
                         self.last_identifiers = {}
                     if not detected_currency:
                         # Heuristic body scan if structured tags missing
-                        body_l = resp.text.lower()
+                        body_l = html_text.lower()
                         has_ca = ('ca$' in body_l) or (' cad' in body_l)
                         has_us = ('us$' in body_l) or (' usd' in body_l)
                         if has_ca and not has_us:
                             heuristic_currency = 'CAD'
                         elif has_us and not has_ca:
                             heuristic_currency = 'USD'
-            except requests.exceptions.RequestException:
-                pass
+                except Exception:
+                    pass
 
         if not detected_currency:
             host_guess_currency = self._guess_currency_from_url(url)
