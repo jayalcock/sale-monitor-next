@@ -2,11 +2,15 @@
 <html lang="en" class="h-full dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#111827">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{% block title %}Sale Monitor Dashboard{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
     <link rel="icon" type="image/png" sizes="256x256" href="{{ url_for('static', filename='img/icon.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -38,6 +42,22 @@
         body {
             font-family: 'Inter', sans-serif;
             background-color: #111827;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* Safe area padding for notched devices */
+        @supports (padding: env(safe-area-inset-bottom)) {
+            body { padding-bottom: env(safe-area-inset-bottom); }
+        }
+        /* Smooth momentum scrolling on iOS */
+        .overflow-x-auto, .overflow-y-auto {
+            -webkit-overflow-scrolling: touch;
+        }
+        /* Ensure minimum tap target size on mobile */
+        @media (max-width: 640px) {
+            button, a.inline-flex, select, input[type="text"] {
+                min-height: 44px;
+            }
+            select { font-size: 16px; } /* Prevents iOS zoom on focus */
         }
         /* Page fade-in transition */
         @keyframes pageFadeIn {
@@ -53,6 +73,13 @@
             display: flex; flex-direction: column-reverse; gap: 0.5rem;
             z-index: 9999; pointer-events: none;
         }
+        @media (max-width: 640px) {
+            .sm-toast-stack {
+                bottom: 0; right: 0; left: 0;
+                padding: 0.75rem;
+                align-items: stretch;
+            }
+        }
         .sm-toast {
             pointer-events: auto;
             min-width: 280px; max-width: 400px;
@@ -61,6 +88,11 @@
             box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3);
             display: flex; align-items: start; gap: 0.5rem;
             animation: toastIn 0.3s ease-out;
+        }
+        @media (max-width: 640px) {
+            .sm-toast {
+                min-width: unset; max-width: none; width: 100%;
+            }
         }
         .sm-toast.removing { animation: toastOut 0.25s ease-in forwards; }
         .sm-toast-success { background-color: #065f46; border: 1px solid #059669; }
@@ -206,18 +238,18 @@
                 </div>
             </div>
             <!-- Mobile menu -->
-            <div class="sm:hidden hidden" id="mobile-menu">
-                <div class="pt-2 pb-3 space-y-1">
-                    <a href="/" class="{% if request.path == '/' or request.path.startswith('/product/detail') %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Dashboard</a>
-                    <a href="/alerts" class="{% if request.path == '/alerts' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium relative">
+            <div class="sm:hidden" id="mobile-menu" style="max-height:0; overflow:hidden; transition:max-height 0.3s ease-in-out;">
+                <div class="pt-2 pb-3 space-y-0.5">
+                    <a href="/" class="{% if request.path == '/' or request.path.startswith('/product/detail') %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Dashboard</a>
+                    <a href="/alerts" class="{% if request.path == '/alerts' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium relative min-h-[44px] flex items-center">
                         Alerts
                         <span id="alerts-badge-mobile" class="ml-1.5 hidden items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"></span>
                     </a>
-                    <a href="/compare" class="{% if request.path == '/compare' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Compare</a>
-                    <a href="/failures" class="{% if request.path == '/failures' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Failures</a>
-                    <a href="/manage" class="{% if request.path == '/manage' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Manage</a>
-                    <a href="/api/export/history" download class="border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Export</a>
-                    <a href="/settings" class="{% if request.path == '/settings' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-2 border-l-4 text-base font-medium">Settings</a>
+                    <a href="/compare" class="{% if request.path == '/compare' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Compare</a>
+                    <a href="/failures" class="{% if request.path == '/failures' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Failures</a>
+                    <a href="/manage" class="{% if request.path == '/manage' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Manage</a>
+                    <a href="/api/export/history" download class="border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Export</a>
+                    <a href="/settings" class="{% if request.path == '/settings' %}bg-primary-900/50 border-primary-500 text-primary-300{% else %}border-transparent text-gray-300 hover:bg-gray-700 hover:border-gray-500 hover:text-white{% endif %} block pl-3 pr-4 py-3 border-l-4 text-base font-medium min-h-[44px] flex items-center">Settings</a>
                 </div>
             </div>
         </nav>
@@ -233,12 +265,18 @@
     <div id="sm-toast-stack" class="sm-toast-stack"></div>
     
     <script>
-        // Mobile menu toggle
+        // Mobile menu toggle with slide animation
         const menuButton = document.getElementById('mobile-menu-button');
         const mobileMenu = document.getElementById('mobile-menu');
         if (menuButton && mobileMenu) {
+            let menuOpen = false;
             menuButton.addEventListener('click', () => {
-                mobileMenu.classList.toggle('hidden');
+                if (menuOpen) {
+                    mobileMenu.style.maxHeight = '0';
+                } else {
+                    mobileMenu.style.maxHeight = mobileMenu.scrollHeight + 'px';
+                }
+                menuOpen = !menuOpen;
             });
         }
         

@@ -636,11 +636,13 @@ function loadHistory(url, groupKey) {
                     },
                     scales: {
                         x: {
+                            offset: false,
                             grid: { color: '#374151' },
                             ticks: {
                                 font: fontSizeForDevice(),
                                 color: '#9ca3af',
-                                maxTicksLimit: isMobile() ? 4 : 10
+                                maxTicksLimit: isMobile() ? 4 : 10,
+                                align: 'inner'
                             }
                         },
                         y: {
@@ -650,8 +652,11 @@ function loadHistory(url, groupKey) {
                                 font: fontSizeForDevice(),
                                 color: '#9ca3af',
                                 maxTicksLimit: isMobile() ? 4 : 10,
+                                mirror: true,
+                                padding: -4,
+                                z: 1,
                                 callback: function(value) {
-                                    return '$' + value.toFixed(2);
+                                    return '$' + Number(value).toFixed(0);
                                 }
                             }
                         }
@@ -742,7 +747,7 @@ function loadData() {
                                         const merchant = (function(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return `Vendor ${idx+1}`; } })(items[idx].url);
                                         return { label: merchant, data, borderColor: color, backgroundColor: color.replace('50%','80%'), spanGaps: true, tension: 0.15, pointRadius: 0, pointHoverRadius: 6, pointHoverBorderWidth: 2, pointHoverBorderColor: '#fff' };
                                     });
-                                    chart = new Chart(ctx, { type: 'line', data: { labels: allDates.map(d => new Date(d).toLocaleDateString()), datasets }, plugins: [darkBgPlugin], options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } }, interaction: { mode: 'nearest', intersect: false }, scales: { x: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', callback: v => `$${Number(v).toFixed(2)}` } } } } });
+                                    chart = new Chart(ctx, { type: 'line', data: { labels: allDates.map(d => new Date(d).toLocaleDateString()), datasets }, plugins: [darkBgPlugin], options: { responsive: true, maintainAspectRatio: false, layout: { padding: { left: 0, right: 0 } }, plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } }, interaction: { mode: 'nearest', intersect: false }, scales: { x: { offset: false, grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', align:'inner' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', mirror:true, padding:-4, z:1, callback: v => `$${Number(v).toFixed(0)}` } } } } });
                                     document.getElementById('price-chart-loader')?.classList.add('hidden');
                                 }).catch(e => { document.getElementById('price-chart-loader')?.classList.add('hidden'); console.error('Error rendering group chart:', e); });
                             }).catch(e => { document.getElementById('price-chart-loader')?.classList.add('hidden'); console.error('Error fetching compare groups:', e); });
@@ -906,7 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     maintainAspectRatio: false,
                                     plugins: { legend: { position: 'bottom', labels: { color: '#d1d5db' } }, tooltip: { enabled: true, backgroundColor:'rgba(31,41,55,0.95)', titleColor:'#fff', bodyColor:'#d1d5db' } },
                                     interaction: { mode: 'nearest', intersect: false },
-                                    scales: { x: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', callback: v => `$${Number(v).toFixed(2)}` } } }
+                                    scales: { x: { offset: false, grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', align:'inner' } }, y: { grid: { color:'#374151', drawBorder:false }, ticks: { color:'#9ca3af', mirror:true, padding:-4, z:1, callback: v => `$${Number(v).toFixed(0)}` } } }
                                 }
                             });
 

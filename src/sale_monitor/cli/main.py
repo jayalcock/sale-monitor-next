@@ -34,6 +34,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
         store = ProductStore(args.history_db)
     products = store.get_all()
     state = load_state(args.state_file)
+    ex_service = ExchangeRateService(cache_handler=history)
 
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products")
@@ -90,7 +91,6 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
             price_in_base = price
         elif history:
             try:
-                ex_service = ExchangeRateService(cache_handler=history)
                 converted = ex_service.convert(float(price), currency, base_currency)
                 price_in_base = converted if converted is not None else None
             except Exception:
@@ -241,9 +241,8 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
         state[key] = rec
         updated += 1
 
-        # Incremental save: persist state after each product to avoid partial loss on crash
-        save_state(args.state_file, state)
-
+    # Save state once after processing all products (atomic write protects against partial loss)
+    save_state(args.state_file, state)
     logging.info(f"Updated {updated} products. State saved to {args.state_file}.")
     return updated
 
@@ -416,7 +415,7 @@ def main() -> int:
     try:
         while True:
             schedule.run_pending()
-            time.sleep(1)
+            time.sleep(30)
     except KeyboardInterrupt:
         logging.info("Scheduler stopped by user")
         return 0

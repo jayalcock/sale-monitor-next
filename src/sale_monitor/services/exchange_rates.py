@@ -2,8 +2,9 @@
 Exchange rate service with free API and caching.
 """
 import logging
+import time as _time
 import requests
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,9 @@ class ExchangeRateService:
     # Free API, no key required
     API_URL = "https://api.exchangerate-api.com/v4/latest/{base}"
     
+    # Cache TTL: rates are valid for 1 hour
+    _CACHE_TTL_SECONDS = 3600
+    
     def __init__(self, cache_handler=None, timeout: int = 10):
         """
         Initialize exchange rate service.
@@ -25,7 +29,8 @@ class ExchangeRateService:
         """
         self.cache_handler = cache_handler
         self.timeout = timeout
-        self._memory_cache: Dict[str, Dict[str, float]] = {}
+        # {from_currency: (timestamp, {to_currency: rate})}
+        self._memory_cache: Dict[str, Tuple[float, Dict[str, float]]] = {}
     
     def get_rate(self, from_currency: str, to_currency: str) -> Optional[float]:
         """
@@ -37,20 +42,26 @@ class ExchangeRateService:
         if from_currency == to_currency:
             return 1.0
         
-        # Check memory cache first (for current session)
+        # Check memory cache first (with TTL)
         if from_currency in self._memory_cache:
-            if to_currency in self._memory_cache[from_currency]:
-                return self._memory_cache[from_currency][to_currency]
+            cached_time, cached_rates = self._memory_cache[from_currency]
+            if _time.monotonic() - cached_time < self._CACHE_TTL_SECONDS:
+                if to_currency in cached_rates:
+                    return cached_rates[to_currency]
+            else:
+                del self._memory_cache[from_currency]
         
         # Check persistent cache
         if self.cache_handler:
             cached_rate = self.cache_handler.get_cached_rate(from_currency, to_currency)
             if cached_rate is not None:
                 logger.debug("Using cached rate: %s/%s = %s", from_currency, to_currency, cached_rate)
-                # Update memory cache
-                if from_currency not in self._memory_cache:
-                    self._memory_cache[from_currency] = {}
-                self._memory_cache[from_currency][to_currency] = cached_rate
+                # Update memory cache with current timestamp
+                if from_currency in self._memory_cache:
+                    _, existing_rates = self._memory_cache[from_currency]
+                    existing_rates[to_currency] = cached_rate
+                else:
+                    self._memory_cache[from_currency] = (_time.monotonic(), {to_currency: cached_rate})
                 return cached_rate
         
         # Fetch from API
@@ -71,15 +82,13 @@ class ExchangeRateService:
             rate = float(rates[to_currency])
             logger.info("Fetched rate: %s/%s = %s", from_currency, to_currency, rate)
             
-            # Cache the entire rates dict
-            if from_currency not in self._memory_cache:
-                self._memory_cache[from_currency] = {}
-            
+            # Cache the entire rates dict with timestamp
+            rate_dict: Dict[str, float] = {}
             for currency, value in rates.items():
-                self._memory_cache[from_currency][currency] = float(value)
-                # Persist to cache
+                rate_dict[currency] = float(value)
                 if self.cache_handler:
                     self.cache_handler.cache_exchange_rate(from_currency, currency, float(value))
+            self._memory_cache[from_currency] = (_time.monotonic(), rate_dict)
             
             return rate
             
@@ -101,6 +110,10 @@ class ExchangeRateService:
         except (ValueError, KeyError) as e:
             logger.error("Invalid API response: %s", e)
             return None
+    
+    def clear_cache(self):
+        """Clear the in-memory rate cache."""
+        self._memory_cache.clear()
     
     def convert(self, amount: float, from_currency: str, to_currency: str) -> Optional[float]:
         """

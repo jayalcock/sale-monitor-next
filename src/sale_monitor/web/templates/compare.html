@@ -87,7 +87,7 @@
         .join('');
 
       return `
-        <div class="mb-5 rounded border border-gray-700 overflow-hidden">\n        <div class="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">\n          <div>\n            <div class="text-sm text-gray-200"><span class="font-semibold text-white">Group:</span> ${g.group_key}</div>\n            <div class="text-xs mt-1 flex flex-wrap">${idSummary}</div>\n          </div>\n          <button class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-700" data-group="${cssSafe(g.group_key)}" onclick="toggleGroup('${cssSafe(g.group_key)}')">Toggle Vendors</button>\n        </div>\n        <div id="g_${cssSafe(g.group_key)}" class="group-vendors">${items}</div>\n      </div>`;
+        <div class="mb-5 rounded border border-gray-700 overflow-hidden">\n        <div class="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-700">\n          <div>\n            <div class="text-sm text-gray-200"><span class="font-semibold text-white">Group:</span> ${g.group_key}</div>\n            <div class="text-xs mt-1 flex flex-wrap">${idSummary}</div>\n          </div>\n          <button class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-200 hover:bg-gray-700" data-group="${cssSafe(g.group_key)}" onclick="toggleGroup('${cssSafe(g.group_key)}')">Toggle Vendors</button>\n        </div>\n        <div id="g_${cssSafe(g.group_key)}" class="group-vendors" style="overflow:hidden; transition:max-height 0.3s ease-in-out;">${items}</div>\n      </div>`;
     }).join('');
 
     container.innerHTML = rows;
@@ -100,7 +100,12 @@
   function toggleGroup(key) {
     const el = document.getElementById('g_' + key);
     if (!el) return;
-    el.classList.toggle('hidden');
+    const isCollapsed = el.style.maxHeight === '0px';
+    if (isCollapsed) {
+      el.style.maxHeight = el.scrollHeight + 'px';
+    } else {
+      el.style.maxHeight = '0px';
+    }
   }
 
   // showError - provided by base.html (pushToast-based)

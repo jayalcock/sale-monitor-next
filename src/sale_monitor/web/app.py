@@ -26,6 +26,25 @@ from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
 logger = logging.getLogger(__name__)
 
 
+class _CachedState:
+    """Read state.json only when the file has changed (mtime-based)."""
+
+    def __init__(self, path: str):
+        self._path = path
+        self._mtime: float = 0.0
+        self._data: dict = {}
+
+    def get(self) -> dict:
+        try:
+            mt = os.path.getmtime(self._path)
+        except OSError:
+            return {}
+        if mt != self._mtime:
+            self._data = load_state(self._path)
+            self._mtime = mt
+        return self._data
+
+
 def create_app():
     """Create and configure Flask application."""
     flask_app = Flask(__name__)
@@ -52,6 +71,15 @@ def create_app():
     # Initial/base currency from env or config file
     initial_base_currency = os.getenv('BASE_CURRENCY') or get_base_currency(flask_app.config['CONFIG_FILE'])
     flask_app.config['BASE_CURRENCY'] = initial_base_currency.upper()
+
+    # Shared mtime-cached state reader (avoids re-parsing JSON on every request)
+    flask_app.config['_STATE_CACHE'] = _CachedState(flask_app.config['STATE_FILE'])
+
+    # Shared PriceHistory and ExchangeRateService instances
+    _shared_history = PriceHistory(flask_app.config['HISTORY_DB'])
+    _shared_ex_service = ExchangeRateService(cache_handler=_shared_history)
+    flask_app.config['_HISTORY'] = _shared_history
+    flask_app.config['_EX_SERVICE'] = _shared_ex_service
     
     # --------------- Rate Limiting ---------------
     try:
@@ -238,12 +266,11 @@ def create_app():
         try:
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
-            state = load_state(flask_app.config['STATE_FILE'])
+            state = flask_app.config['_STATE_CACHE'].get()
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
 
-            # Create exchange service once, reuse across all products
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
-            ex_service = ExchangeRateService(cache_handler=history)
+            # Reuse shared exchange rate service
+            ex_service = flask_app.config['_EX_SERVICE']
 
             result = []
             for p in products:
@@ -302,7 +329,7 @@ def create_app():
             if not url and not group_key:
                 return jsonify({'error': 'URL or group_key parameter required'}), 400
 
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            history = flask_app.config['_HISTORY']
             days = int(request.args.get('days', 30))
 
             # Group stats: aggregate across all URLs in the group
@@ -310,7 +337,7 @@ def create_app():
                 # Build groups and find members
                 product_store = flask_app.config['PRODUCT_STORE']
                 products = product_store.get_all()
-                state = load_state(flask_app.config['STATE_FILE'])
+                state = flask_app.config['_STATE_CACHE'].get()
                 base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
                 group = next((g for g in groups if g.get('group_key') == group_key), None)
@@ -327,7 +354,7 @@ def create_app():
                 if not records:
                     return jsonify({'error': 'No data'}), 404
                 # Compute stats on base prices
-                ex_service = ExchangeRateService(cache_handler=history)
+                ex_service = flask_app.config['_EX_SERVICE']
                 base_prices = []
                 for (ts, price, currency) in records:
                     try:
@@ -371,15 +398,15 @@ def create_app():
                 return jsonify({'error': 'URL or group_key parameter required'}), 400
 
             days = int(request.args.get('days', 30))
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
-            ex_service = ExchangeRateService(cache_handler=history)
+            history = flask_app.config['_HISTORY']
+            ex_service = flask_app.config['_EX_SERVICE']
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
             records = []
             if group_key:
                 # Build groups and aggregate histories from members
                 product_store = flask_app.config['PRODUCT_STORE']
                 products = product_store.get_all()
-                state = load_state(flask_app.config['STATE_FILE'])
+                state = flask_app.config['_STATE_CACHE'].get()
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
                 group = next((g for g in groups if g.get('group_key') == group_key), None)
                 if not group:
@@ -392,7 +419,7 @@ def create_app():
 
             # If no DB records, synthesize one from state so chart isn't blank
             if not records and url:
-                st = load_state(flask_app.config['STATE_FILE']).get(url)
+                st = flask_app.config['_STATE_CACHE'].get().get(url)
                 if st and 'current_price' in st:
                     cur = st.get('current_price')
                     cur_currency = (st.get('currency') or 'CAD').upper()
@@ -507,7 +534,7 @@ def create_app():
             
             if price is None:
                 # Record failure in history for alerts tracking
-                history = PriceHistory(flask_app.config['HISTORY_DB'])
+                history = flask_app.config['_HISTORY']
                 history.record_price(product.url, product.name, None, status='failed', currency=product.currency or 'CAD')
                 return jsonify({'error': 'Failed to extract price'}), 500
             
@@ -528,8 +555,7 @@ def create_app():
             if currency == base_currency:
                 price_in_base = price
             else:
-                history = PriceHistory(flask_app.config['HISTORY_DB'])
-                ex_service = ExchangeRateService(cache_handler=history)
+                ex_service = flask_app.config['_EX_SERVICE']
                 converted = ex_service.convert(float(price), currency, base_currency)
                 price_in_base = converted if converted is not None else None
 
@@ -555,8 +581,7 @@ def create_app():
             save_state(flask_app.config['STATE_FILE'], state)
             
             # Record in history (count as success so stats include manual checks)
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
-            history.record_price(product.url, product.name, price, status='success', currency=currency, price_cad=price_in_base)
+            flask_app.config['_HISTORY'].record_price(product.url, product.name, price, status='success', currency=currency, price_cad=price_in_base)
             
             return jsonify({
                 'success': True,
@@ -586,8 +611,8 @@ def create_app():
                 return jsonify({'success': True, 'updated': 0, 'failed': 0, 'message': 'No enabled products'}), 200
 
             state = load_state(flask_app.config['STATE_FILE'])
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
-            ex_service = ExchangeRateService(cache_handler=history)
+            history = flask_app.config['_HISTORY']
+            ex_service = flask_app.config['_EX_SERVICE']
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
 
             extractor = PriceExtractor(
@@ -1072,8 +1097,8 @@ def create_app():
         try:
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
-            state = load_state(flask_app.config['STATE_FILE'])
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            state = flask_app.config['_STATE_CACHE'].get()
+            history = flask_app.config['_HISTORY']
 
             alerts = []
             failure_threshold = float(os.getenv('ALERT_FAILURE_THRESHOLD', '50'))  # 50% failure rate
@@ -1185,7 +1210,7 @@ def create_app():
         try:
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
-            state = load_state(flask_app.config['STATE_FILE'])
+            state = flask_app.config['_STATE_CACHE'].get()
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
             try:
                 groups = _build_comparison_groups(state or {}, products or [], base_currency)
@@ -1326,8 +1351,8 @@ def create_app():
         try:
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
-            state = load_state(flask_app.config['STATE_FILE'])
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
+            state = flask_app.config['_STATE_CACHE'].get()
+            history = flask_app.config['_HISTORY']
             
             days = int(request.args.get('days', 7))
             
@@ -1486,7 +1511,7 @@ def create_app():
                 if not records:
                     # Fallback: synthesize a single point from current state
                     try:
-                        st = load_state(flask_app.config['STATE_FILE']).get(url)
+                        st = flask_app.config['_STATE_CACHE'].get().get(url)
                         if st and 'current_price' in st:
                             cur = st.get('current_price')
                             cur_currency = (st.get('currency') or 'CAD').upper()
@@ -1618,7 +1643,7 @@ def create_app():
             # Last check time from state
             last_check = None
             try:
-                state = load_state(flask_app.config['STATE_FILE'])
+                state = flask_app.config['_STATE_CACHE'].get()
                 timestamps = [
                     rec.get('last_checked', '')
                     for rec in state.values()
