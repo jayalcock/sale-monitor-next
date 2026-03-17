@@ -1781,7 +1781,16 @@ def create_app():
 
     # ---------------- Product Image Endpoint (added) -----------------
     # Simple in-memory image cache: {url: {image_url: str, fetched: datetime}}
+    # Bounded to prevent unbounded memory growth.
     _IMAGE_CACHE = {}
+    _IMAGE_CACHE_MAX = 500
+
+    def _image_cache_set(url: str, entry: dict):
+        _IMAGE_CACHE[url] = entry
+        if len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
+            # Evict oldest entry
+            oldest = min(_IMAGE_CACHE, key=lambda k: _IMAGE_CACHE[k].get('fetched', datetime.min.replace(tzinfo=timezone.utc)))
+            del _IMAGE_CACHE[oldest]
 
     def _is_public_url(url: str) -> bool:
         """Basic SSRF guard: allow only http/https and public IPs/hosts."""
@@ -2009,7 +2018,7 @@ def create_app():
             if img and not _is_public_url(img):
                 return None
             if img:
-                _IMAGE_CACHE[url] = {'image_url': img, 'fetched': now}
+                _image_cache_set(url, {'image_url': img, 'fetched': now})
             return img
         except requests.exceptions.RequestException:
             return None
@@ -2199,9 +2208,14 @@ def create_app():
             _warmup_images_once()
 
     if os.getenv('ENABLE_IMAGE_WARMUP', '1').strip().lower() not in ('0','false','no'):
+        # Only start the warmup thread in one gunicorn worker to avoid
+        # duplicate CPU-intensive image processing across all workers.
         import threading
-        t = threading.Thread(target=_warmup_loop, name='image-warmup', daemon=True)
-        t.start()
+        _warmup_started = os.getenv('_IMAGE_WARMUP_STARTED')
+        if not _warmup_started:
+            os.environ['_IMAGE_WARMUP_STARTED'] = '1'
+            t = threading.Thread(target=_warmup_loop, name='image-warmup', daemon=True)
+            t.start()
     
     return flask_app
 

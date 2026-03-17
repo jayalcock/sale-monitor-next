@@ -5,8 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Certificates for HTTPS requests
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# Certificates for HTTPS requests + curl for lightweight healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
