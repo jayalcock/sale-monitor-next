@@ -111,6 +111,24 @@ class ExchangeRateService:
             logger.error("Invalid API response: %s", e)
             return None
     
+    def prefetch(self, from_currencies, to_currency: str):
+        """Pre-warm the memory cache for a set of source currencies.
+
+        Only makes API calls for currencies not already cached.  After this
+        call, individual ``get_rate`` / ``convert`` calls for the same pairs
+        will be served from memory.
+        """
+        for cur in set(from_currencies):
+            if cur == to_currency:
+                continue
+            # Already warm?
+            if cur in self._memory_cache:
+                cached_time, cached_rates = self._memory_cache[cur]
+                if _time.monotonic() - cached_time < self._CACHE_TTL_SECONDS and to_currency in cached_rates:
+                    continue
+            # This populates the memory cache (API or persistent fallback)
+            self.get_rate(cur, to_currency)
+
     def clear_cache(self):
         """Clear the in-memory rate cache."""
         self._memory_cache.clear()

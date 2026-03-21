@@ -45,6 +45,68 @@ class _CachedState:
         return self._data
 
 
+class _CachedProductStore:
+    """Thin cache over ProductStore.get_all() that re-queries only when the DB file changes."""
+
+    _TTL = 2.0  # seconds – avoids stat() storms while still feeling fresh
+
+    def __init__(self, store: 'ProductStore'):
+        self._store = store
+        self._db_path = store.db_path
+        self._mtime: float = 0.0
+        self._last_check: float = 0.0
+        self._products: list = []
+
+    def get_all(self):
+        now = time.monotonic()
+        if now - self._last_check < self._TTL:
+            return self._products
+        self._last_check = now
+        try:
+            mt = os.path.getmtime(self._db_path)
+        except OSError:
+            return self._products
+        if mt != self._mtime:
+            self._products = self._store.get_all()
+            self._mtime = mt
+        return self._products
+
+    def invalidate(self):
+        """Force a refresh on next access (call after writes)."""
+        self._mtime = 0.0
+        self._last_check = 0.0
+
+    # Write-through methods that invalidate the cache
+    def add(self, *args, **kwargs):
+        result = self._store.add(*args, **kwargs)
+        self.invalidate()
+        return result
+
+    def update(self, *args, **kwargs):
+        result = self._store.update(*args, **kwargs)
+        self.invalidate()
+        return result
+
+    def delete(self, *args, **kwargs):
+        result = self._store.delete(*args, **kwargs)
+        self.invalidate()
+        return result
+
+    def replace_all(self, *args, **kwargs):
+        result = self._store.replace_all(*args, **kwargs)
+        self.invalidate()
+        return result
+
+    def import_from_csv(self, *args, **kwargs):
+        result = self._store.import_from_csv(*args, **kwargs)
+        self.invalidate()
+        return result
+
+    def __getattr__(self, name):
+        """Delegate everything else to the underlying store."""
+        return getattr(self._store, name)
+
+
 def create_app():
     """Create and configure Flask application."""
     flask_app = Flask(__name__)
@@ -54,8 +116,9 @@ def create_app():
     flask_app.config['STATE_FILE'] = os.getenv('STATE_FILE', 'data/state.json')
     flask_app.config['HISTORY_DB'] = os.getenv('HISTORY_DB', 'data/history.db')
 
-    # Initialize product store (SQLite-backed)
-    product_store = ProductStore(flask_app.config['HISTORY_DB'])
+    # Initialize product store (SQLite-backed) with read cache
+    _raw_product_store = ProductStore(flask_app.config['HISTORY_DB'])
+    product_store = _CachedProductStore(_raw_product_store)
     flask_app.config['PRODUCT_STORE'] = product_store
 
     # Auto-import from CSV on first run (one-time migration)
@@ -271,6 +334,17 @@ def create_app():
 
             # Reuse shared exchange rate service
             ex_service = flask_app.config['_EX_SERVICE']
+
+            # Pre-fetch all needed exchange rates in one batch so individual
+            # convert() calls below are served from memory cache.
+            product_currencies = set()
+            for p in products:
+                sd = state.get(p.url, {})
+                cur = (sd.get('currency') or getattr(p, 'currency', None) or 'CAD').upper()
+                if cur != base_currency:
+                    product_currencies.add(cur)
+            if product_currencies:
+                ex_service.prefetch(product_currencies, base_currency)
 
             result = []
             for p in products:
@@ -1103,11 +1177,13 @@ def create_app():
             alerts = []
             failure_threshold = float(os.getenv('ALERT_FAILURE_THRESHOLD', '50'))  # 50% failure rate
             min_checks = int(os.getenv('ALERT_MIN_CHECKS', '3'))  # Minimum 3 checks to report
-            
-            for p in products:
-                if not p.enabled:
-                    continue
 
+            # Pre-fetch failure stats for all enabled products in one query
+            enabled_products = [p for p in products if p.enabled]
+            enabled_urls = [p.url for p in enabled_products]
+            batch_failure = history.get_failure_stats_batch(enabled_urls, days=7)
+
+            for p in enabled_products:
                 state_data = state.get(p.url, {})
                 current = state_data.get('current_price')
 
@@ -1126,10 +1202,10 @@ def create_app():
 
                     # Check discount threshold - use historical max price from DB
                     elif p.discount_threshold:
-                        # Get historical stats to find the highest price in last 30 days
+                        # get_stats now uses SQL aggregates (no full-table scan)
                         stats = history.get_stats(p.url, days=30)
                         max_price = stats.get('max_price')
-                        
+
                         if max_price and max_price > current:
                             discount = ((max_price - current) / max_price) * 100
                             if discount >= p.discount_threshold:
@@ -1145,24 +1221,20 @@ def create_app():
                             'message': message,
                             'last_checked': state_data.get('last_checked')
                         })
-                
-                # Check for high failure rate (last 7 days)
-                try:
-                    failure_stats = history.get_failure_stats(p.url, days=7)
-                    if (failure_stats['total_checks'] >= min_checks and 
-                        failure_stats['failure_rate'] >= failure_threshold):
-                        alerts.append({
-                            'name': p.name,
-                            'url': p.url,
-                            'current_price': current,
-                            'alert_type': 'high_failure',
-                            'message': f"Price extraction failing {failure_stats['failure_rate']:.0f}% of the time ({failure_stats['failed_checks']}/{failure_stats['total_checks']} checks)",
-                            'last_checked': state_data.get('last_checked'),
-                            'failure_stats': failure_stats
-                        })
-                except (sqlite3.Error, KeyError):
-                    # Skip failure check if history unavailable
-                    pass
+
+                # Check for high failure rate (last 7 days) — from batch result
+                failure_stats = batch_failure.get(p.url)
+                if failure_stats and (failure_stats['total_checks'] >= min_checks and
+                    failure_stats['failure_rate'] >= failure_threshold):
+                    alerts.append({
+                        'name': p.name,
+                        'url': p.url,
+                        'current_price': current,
+                        'alert_type': 'high_failure',
+                        'message': f"Price extraction failing {failure_stats['failure_rate']:.0f}% of the time ({failure_stats['failed_checks']}/{failure_stats['total_checks']} checks)",
+                        'last_checked': state_data.get('last_checked'),
+                        'failure_stats': failure_stats
+                    })
 
             # Optional competitive alerts (gated by env to avoid test disruption)
             enable_competitive = os.getenv('ENABLE_COMPETITIVE_ALERTS', '0').strip().lower() in ('1','true','yes')
@@ -1355,31 +1427,30 @@ def create_app():
             history = flask_app.config['_HISTORY']
             
             days = int(request.args.get('days', 7))
-            
+
+            # Single batch query instead of per-product loop
+            all_urls = [p.url for p in products]
+            batch_stats = history.get_failure_stats_batch(all_urls, days=days)
+
             failures = []
             for p in products:
-                try:
-                    failure_stats = history.get_failure_stats(p.url, days=days)
-                    state_data = state.get(p.url, {})
-                    
-                    # Include products with at least one failure
-                    if failure_stats['failed_checks'] > 0:
-                        failures.append({
-                            'name': p.name,
-                            'url': p.url,
-                            'enabled': p.enabled,
-                            'total_checks': failure_stats['total_checks'],
-                            'failed_checks': failure_stats['failed_checks'],
-                            'failure_rate': failure_stats['failure_rate'],
-                            'last_success': failure_stats.get('last_success'),
-                            'last_failure': failure_stats.get('last_failure'),
-                            'last_checked': state_data.get('last_checked'),
-                            'current_price': state_data.get('current_price'),
-                            'currency': state_data.get('currency', 'CAD')
-                        })
-                except (sqlite3.Error, KeyError):
-                    # Skip if history unavailable for this product
+                failure_stats = batch_stats.get(p.url)
+                if not failure_stats or failure_stats['failed_checks'] <= 0:
                     continue
+                state_data = state.get(p.url, {})
+                failures.append({
+                    'name': p.name,
+                    'url': p.url,
+                    'enabled': p.enabled,
+                    'total_checks': failure_stats['total_checks'],
+                    'failed_checks': failure_stats['failed_checks'],
+                    'failure_rate': failure_stats['failure_rate'],
+                    'last_success': failure_stats.get('last_success'),
+                    'last_failure': failure_stats.get('last_failure'),
+                    'last_checked': state_data.get('last_checked'),
+                    'current_price': state_data.get('current_price'),
+                    'currency': state_data.get('currency', 'CAD')
+                })
             
             # Sort by failure rate descending, then by failed count
             failures.sort(key=lambda x: (x['failure_rate'], x['failed_checks']), reverse=True)

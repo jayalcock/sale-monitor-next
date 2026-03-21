@@ -389,30 +389,96 @@ class PriceHistory:
             'last_failure': last_failure
         }
 
+    def get_failure_stats_batch(self, product_urls: list, days: int = 7) -> dict:
+        """Get failure statistics for multiple products in a single query.
+
+        Returns dict mapping product_url -> failure stats dict (same shape as
+        ``get_failure_stats``).  Products with no history are omitted.
+        """
+        if not product_urls:
+            return {}
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            placeholders = ",".join("?" for _ in product_urls)
+            cursor = conn.execute(
+                f"""
+                SELECT
+                    product_url,
+                    SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN timestamp >= ? AND check_status != 'success' THEN 1 ELSE 0 END),
+                    MAX(CASE WHEN check_status = 'success' THEN timestamp END),
+                    MAX(CASE WHEN check_status != 'success' THEN timestamp END)
+                FROM price_history
+                WHERE product_url IN ({placeholders})
+                GROUP BY product_url
+                """,
+                [cutoff, cutoff] + list(product_urls),
+            )
+
+            result = {}
+            for row in cursor:
+                url, total, failed, last_success, last_failure = row
+                total = total or 0
+                failed = failed or 0
+                failure_rate = (failed / total * 100) if total > 0 else 0
+                result[url] = {
+                    "total_checks": total,
+                    "failed_checks": failed,
+                    "failure_rate": round(failure_rate, 1),
+                    "last_success": last_success,
+                    "last_failure": last_failure,
+                }
+            return result
+
     def get_stats(self, product_url: str, days: Optional[int] = None) -> dict:
-        """Get statistics for a product, using frontend-expected key names."""
-        history = self.get_history_extended(product_url, days=days)
-        if not history:
-            return {}
-        prices = []
-        for _, price, status, _currency, _price_cad in history:
-            if status != "success":
-                continue
-            try:
-                prices.append(float(price))
-            except (TypeError, ValueError):
-                continue
-        if not prices:
-            return {}
-        total = len(prices)
+        """Get statistics for a product, using frontend-expected key names.
+
+        Uses SQL aggregates so we never load the full history into Python.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+                SELECT MIN(price), MAX(price), AVG(price), COUNT(*),
+                       MIN(timestamp), MAX(timestamp)
+                FROM price_history
+                WHERE product_url = ? AND check_status = 'success'
+            """
+            params: list = [product_url]
+
+            if days is not None:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                query += " AND timestamp >= ?"
+                params.append(cutoff)
+
+            row = conn.execute(query, params).fetchone()
+            if not row or not row[3]:
+                return {}
+
+            min_price, max_price, avg_price, total, first_check, latest_check = row
+
+            # Current price = most recent successful price
+            cur_query = """
+                SELECT price FROM price_history
+                WHERE product_url = ? AND check_status = 'success'
+            """
+            cur_params: list = [product_url]
+            if days is not None:
+                cur_query += " AND timestamp >= ?"
+                cur_params.append(cutoff)
+            cur_query += " ORDER BY timestamp DESC LIMIT 1"
+
+            cur_row = conn.execute(cur_query, cur_params).fetchone()
+            current_price = cur_row[0] if cur_row else min_price
+
         stats = {
-            "min_price": min(prices),
-            "max_price": max(prices),
-            "avg_price": sum(prices) / total,
-            "current_price": prices[0],  # Most recent
+            "min_price": min_price,
+            "max_price": max_price,
+            "avg_price": avg_price,
+            "current_price": current_price,
             "total_checks": total,
-            "first_check": history[-1][0],
-            "latest_check": history[0][0],
+            "first_check": first_check,
+            "latest_check": latest_check,
         }
         # Back-compat for existing callers/tests
         stats["checks_count"] = total
