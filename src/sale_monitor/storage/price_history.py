@@ -433,6 +433,33 @@ class PriceHistory:
                 }
             return result
 
+    def get_max_prices_batch(self, product_urls: list, days: Optional[int] = None) -> dict:
+        """Get max successful price per product in a single query.
+
+        Returns dict mapping product_url -> max_price (float).
+        Products with no successful history are omitted.
+        """
+        if not product_urls:
+            return {}
+
+        with sqlite3.connect(self.db_path) as conn:
+            placeholders = ",".join("?" for _ in product_urls)
+            query = f"""
+                SELECT product_url, MAX(price)
+                FROM price_history
+                WHERE product_url IN ({placeholders})
+                  AND check_status = 'success'
+            """
+            params: list = list(product_urls)
+
+            if days is not None:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                query += " AND timestamp >= ?"
+                params.append(cutoff)
+
+            query += " GROUP BY product_url"
+            return {row[0]: row[1] for row in conn.execute(query, params) if row[1] is not None}
+
     def get_stats(self, product_url: str, days: Optional[int] = None) -> dict:
         """Get statistics for a product, using frontend-expected key names.
 

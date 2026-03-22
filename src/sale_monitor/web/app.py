@@ -1178,10 +1178,12 @@ def create_app():
             failure_threshold = float(os.getenv('ALERT_FAILURE_THRESHOLD', '50'))  # 50% failure rate
             min_checks = int(os.getenv('ALERT_MIN_CHECKS', '3'))  # Minimum 3 checks to report
 
-            # Pre-fetch failure stats for all enabled products in one query
+            # Pre-fetch failure stats and max prices in batch queries
             enabled_products = [p for p in products if p.enabled]
             enabled_urls = [p.url for p in enabled_products]
             batch_failure = history.get_failure_stats_batch(enabled_urls, days=7)
+            discount_urls = [p.url for p in enabled_products if p.discount_threshold]
+            batch_max = history.get_max_prices_batch(discount_urls, days=30) if discount_urls else {}
 
             for p in enabled_products:
                 state_data = state.get(p.url, {})
@@ -1200,11 +1202,9 @@ def create_app():
                         alert_type = 'target_met'
                         message = f'{cur_prefix}Price ${current:.2f} is at or below target ${p.target_price:.2f}'
 
-                    # Check discount threshold - use historical max price from DB
+                    # Check discount threshold - use batch max prices
                     elif p.discount_threshold:
-                        # get_stats now uses SQL aggregates (no full-table scan)
-                        stats = history.get_stats(p.url, days=30)
-                        max_price = stats.get('max_price')
+                        max_price = batch_max.get(p.url)
 
                         if max_price and max_price > current:
                             discount = ((max_price - current) / max_price) * 100
