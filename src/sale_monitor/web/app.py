@@ -506,19 +506,15 @@ def create_app():
                 if status != 'success':
                     continue
 
-                # Prefer stored base-currency price (recorded at check time with
-                # the exchange rate that was current then). Fall back to live
-                # conversion only when the stored value is missing.
+                # Use stored base-currency price (recorded at check time with
+                # the exchange rate that was current then).  No live fallback
+                # — using today's rate would hide real exchange-rate variation.
                 price_in_base = None
                 try:
                     if stored_price_cad is not None:
                         price_in_base = float(stored_price_cad)
-                    elif price is not None and currency:
-                        if currency.upper() == base_currency:
-                            price_in_base = price
-                        else:
-                            converted_base = ex_service.convert(float(price), currency.upper(), base_currency)
-                            price_in_base = converted_base if converted_base is not None else None
+                    elif price is not None and currency and currency.upper() == base_currency:
+                        price_in_base = price
                 except (ValueError, TypeError):
                     pass
 

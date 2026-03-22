@@ -129,22 +129,12 @@ class PriceHistory:
             if 'price_cad' not in columns:
                 conn.execute("ALTER TABLE price_history ADD COLUMN price_cad REAL")
             
-            # Data hygiene: normalize currency to uppercase and clear obviously bad
-            # price_cad values for non-CAD rows (legacy bug wrote foreign price into
-            # price_cad). Only clear when price_cad ~= price to avoid nuking legitimate
-            # historical conversions.
+            # Data hygiene: normalize currency to uppercase
             try:
                 conn.execute("""
                     UPDATE price_history
                     SET currency = UPPER(currency)
                     WHERE currency IS NOT NULL AND currency <> UPPER(currency)
-                """)
-                conn.execute("""
-                    UPDATE price_history
-                    SET price_cad = NULL
-                    WHERE currency IS NOT NULL AND UPPER(currency) <> 'CAD'
-                      AND price_cad IS NOT NULL
-                      AND ABS(COALESCE(price_cad, 0) - COALESCE(price, 0)) < 0.005
                 """)
             except sqlite3.Error:
                 pass
@@ -187,17 +177,10 @@ class PriceHistory:
         if len(cur) != 3 or not cur.isalpha():
             cur = "CAD"
 
-        # Only auto-store price_cad for CAD entries. For non-CAD, keep it NULL unless
-        # a distinct converted value is provided. Clear accidental equal values.
-        if cur == "CAD":
-            if price_cad is None:
-                price_cad = price
-        else:
-            try:
-                if price_cad is not None and abs(float(price_cad) - float(price)) < 0.005:
-                    price_cad = None
-            except (TypeError, ValueError):
-                price_cad = None
+        # Auto-store price_cad for CAD entries; for non-CAD keep the
+        # provided value (which captures the exchange rate at check time).
+        if cur == "CAD" and price_cad is None:
+            price_cad = price
         
         def _do_insert():
             with sqlite3.connect(self.db_path) as conn:

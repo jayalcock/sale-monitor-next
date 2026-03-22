@@ -53,10 +53,52 @@ def _migration_3_create_products_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_4_backfill_price_cad(conn: sqlite3.Connection) -> None:
+    """Backfill NULL price_cad for non-CAD rows using cached or fallback rates.
+
+    Uses the latest cached exchange rate when available, otherwise falls back
+    to reasonable approximations.  This is a one-time migration that locks in
+    an approximate base-currency price so the chart no longer converts old
+    records with today's live rate (which hides real variation).
+    """
+    # Collect currencies that have NULL price_cad rows
+    rows = conn.execute(
+        "SELECT DISTINCT UPPER(currency) FROM price_history "
+        "WHERE price_cad IS NULL AND currency IS NOT NULL AND UPPER(currency) <> 'CAD'"
+    ).fetchall()
+
+    for (cur,) in rows:
+        # Try to get rate from the exchange_rates cache table
+        rate_row = conn.execute(
+            "SELECT rate FROM exchange_rates "
+            "WHERE base_currency = ? AND target_currency = 'CAD' "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (cur,),
+        ).fetchone()
+
+        if rate_row:
+            rate = rate_row[0]
+        else:
+            # Hardcoded fallbacks (approximate March 2026 rates)
+            fallback = {"USD": 1.37, "AUD": 0.90, "EUR": 1.53, "GBP": 1.78}
+            rate = fallback.get(cur)
+            if rate is None:
+                logger.warning("No exchange rate for %s→CAD, skipping backfill", cur)
+                continue
+
+        updated = conn.execute(
+            "UPDATE price_history SET price_cad = ROUND(price * ?, 2) "
+            "WHERE UPPER(currency) = ? AND price_cad IS NULL",
+            (rate, cur),
+        ).rowcount
+        logger.info("Backfilled %d %s rows with rate %s", updated, cur, rate)
+
+
 MIGRATIONS: List[Migration] = [
     (1, "composite index on product_url+timestamp", _migration_1_add_last_checked_index),
     (2, "index on check_status", _migration_2_add_status_index),
     (3, "create products table", _migration_3_create_products_table),
+    (4, "backfill NULL price_cad with approximate rates", _migration_4_backfill_price_cad),
 ]
 
 
