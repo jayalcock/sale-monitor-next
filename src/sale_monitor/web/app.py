@@ -1164,11 +1164,23 @@ def create_app():
         except (OSError, ValueError) as e:
             return _safe_error(e)
 
+    # Alerts cache: recompute only when state file changes
+    _alerts_cache = {'mtime': 0.0, 'data': []}
+
     @flask_app.route('/api/alerts')
     @require_api_key_for_reads
     def api_alerts():
         """Get products that have hit their price targets or discount thresholds."""
         try:
+            # Return cached result if state file hasn't changed
+            state_path = flask_app.config['STATE_FILE']
+            try:
+                st_mtime = os.path.getmtime(state_path)
+            except OSError:
+                st_mtime = 0.0
+            if st_mtime == _alerts_cache['mtime'] and _alerts_cache['data']:
+                return jsonify(_alerts_cache['data'])
+
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
             state = flask_app.config['_STATE_CACHE'].get()
@@ -1271,6 +1283,8 @@ def create_app():
                 except Exception:
                     pass
 
+            _alerts_cache['data'] = alerts
+            _alerts_cache['mtime'] = st_mtime
             return jsonify(alerts)
         except (OSError, ValueError, sqlite3.Error) as e:
             return _safe_error(e)

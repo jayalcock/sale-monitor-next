@@ -149,11 +149,11 @@ class PriceHistory:
             except sqlite3.Error:
                 pass
 
-            # Covering index for batch max-price queries (status + timestamp filter + group by url)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_status_ts_url_price
-                ON price_history(check_status, timestamp, product_url, price)
-            """)
+            # Drop old redundant single-column indexes (covered by composites above)
+            conn.execute("DROP INDEX IF EXISTS idx_product_url")
+            conn.execute("DROP INDEX IF EXISTS idx_timestamp")
+            # Drop unused covering index from prior version
+            conn.execute("DROP INDEX IF EXISTS idx_status_ts_url_price")
 
             conn.commit()
 
