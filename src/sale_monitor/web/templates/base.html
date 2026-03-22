@@ -282,7 +282,7 @@
         
         // Alerts badge updater
         function updateAlertsBadge() {
-            fetch('/api/alerts')
+            fetch('/api/alerts', {signal: AbortSignal.timeout(5000)})
                 .then(r => r.ok ? r.json() : Promise.reject())
                 .then(alerts => {
                     const count = Array.isArray(alerts) ? alerts.length : 0;
