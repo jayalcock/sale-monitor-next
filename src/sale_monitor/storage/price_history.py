@@ -406,15 +406,16 @@ class PriceHistory:
                 f"""
                 SELECT
                     product_url,
-                    SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN timestamp >= ? AND check_status != 'success' THEN 1 ELSE 0 END),
+                    COUNT(*),
+                    SUM(CASE WHEN check_status != 'success' THEN 1 ELSE 0 END),
                     MAX(CASE WHEN check_status = 'success' THEN timestamp END),
                     MAX(CASE WHEN check_status != 'success' THEN timestamp END)
                 FROM price_history
                 WHERE product_url IN ({placeholders})
+                  AND timestamp >= ?
                 GROUP BY product_url
                 """,
-                [cutoff, cutoff] + list(product_urls),
+                list(product_urls) + [cutoff],
             )
 
             result = {}
