@@ -149,7 +149,19 @@ class PriceHistory:
             except sqlite3.Error:
                 pass
 
+            # Covering index for batch max-price queries (status + timestamp filter + group by url)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_status_ts_url_price
+                ON price_history(check_status, timestamp, product_url, price)
+            """)
+
             conn.commit()
+
+            # Keep query planner statistics fresh
+            try:
+                conn.execute("ANALYZE")
+            except sqlite3.Error:
+                pass
 
         # Run schema migrations (versioned, idempotent)
         from sale_monitor.storage.migrations import run_migrations
