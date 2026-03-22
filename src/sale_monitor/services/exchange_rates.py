@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 class ExchangeRateService:
     """Manages exchange rates with free API and fallback caching."""
     
-    # Free API, no key required
-    API_URL = "https://api.exchangerate-api.com/v4/latest/{base}"
+    # Free API, no key required — v6 endpoint provides higher precision rates
+    API_URL = "https://open.er-api.com/v6/latest/{base}"
     
     # Cache TTL: rates are valid for 1 hour
     _CACHE_TTL_SECONDS = 3600
