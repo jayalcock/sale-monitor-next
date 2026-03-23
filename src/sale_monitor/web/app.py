@@ -1347,10 +1347,15 @@ def create_app():
     @flask_app.route('/api/compare/suggest')
     @require_api_key_for_reads
     def api_compare_suggest():
-        """Suggest likely competitor pairs based on fuzzy name matching.
+        """Suggest likely product matches based on fuzzy name matching.
 
-        Excludes products that are already in a comparison group.
-        Returns list of suggestions: [{nameA, urlA, nameB, urlB, similarity}]
+        Two types of suggestions:
+        1. Ungrouped↔ungrouped: two solo products that look similar
+        2. Ungrouped→group: a solo product that matches an existing group
+
+        Returns list of suggestions: [{nameA, urlA, nameB, urlB, similarity, group_key?}]
+        When group_key is present, urlB is already in that group and linking
+        will merge urlA into it.
         """
         try:
             product_store = flask_app.config['PRODUCT_STORE']
@@ -1358,24 +1363,31 @@ def create_app():
             state = flask_app.config['_STATE_CACHE'].get()
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
 
-            # Find URLs already in a group so we can exclude them
             groups = _build_comparison_groups(state or {}, products or [], base_currency)
             grouped_urls = set()
+            # Map grouped URL → (group_key, representative name)
+            url_to_group_info = {}
             for g in groups:
+                rep_name = g['items'][0]['name'] if g.get('items') else g['group_key']
                 for it in g.get('items', []):
                     grouped_urls.add(it.get('url'))
+                    url_to_group_info[it['url']] = (g['group_key'], rep_name)
 
-            # Build normalized names, excluding already-grouped products
-            items = []
+            ungrouped = []
+            name_by_url = {}
             for p in products:
+                name_by_url[p.url] = p.name
                 if p.url not in grouped_urls:
-                    items.append({'url': p.url, 'name': p.name, 'norm': _normalize_name(p.name)})
+                    ungrouped.append({'url': p.url, 'name': p.name, 'norm': _normalize_name(p.name)})
+
             suggestions = []
             threshold = float(os.getenv('COMPARE_NAME_SIMILARITY', '0.88'))
-            # Compare pairs
-            for i in range(len(items)):
-                for j in range(i+1, len(items)):
-                    a, b = items[i], items[j]
+            seen_pairs = set()
+
+            # 1) Ungrouped ↔ ungrouped
+            for i in range(len(ungrouped)):
+                for j in range(i+1, len(ungrouped)):
+                    a, b = ungrouped[i], ungrouped[j]
                     sim = _similar(a['norm'], b['norm'])
                     if sim >= threshold:
                         suggestions.append({
@@ -1383,7 +1395,35 @@ def create_app():
                             'nameB': b['name'], 'urlB': b['url'],
                             'similarity': round(sim, 3)
                         })
-            # Sort by similarity desc
+                        seen_pairs.add((a['url'], b['url']))
+
+            # 2) Ungrouped → existing group (compare against first member of each group)
+            group_reps = []
+            for g in groups:
+                if g.get('items'):
+                    first = g['items'][0]
+                    group_reps.append({
+                        'url': first['url'],
+                        'name': first.get('name', ''),
+                        'norm': _normalize_name(first.get('name', '')),
+                        'group_key': g['group_key'],
+                    })
+
+            for item in ungrouped:
+                for rep in group_reps:
+                    pair = tuple(sorted([item['url'], rep['url']]))
+                    if pair in seen_pairs:
+                        continue
+                    sim = _similar(item['norm'], rep['norm'])
+                    if sim >= threshold:
+                        suggestions.append({
+                            'nameA': item['name'], 'urlA': item['url'],
+                            'nameB': rep['name'], 'urlB': rep['url'],
+                            'similarity': round(sim, 3),
+                            'group_key': rep['group_key'],
+                        })
+                        seen_pairs.add(pair)
+
             suggestions.sort(key=lambda s: s['similarity'], reverse=True)
             return jsonify(_paginate(suggestions))
         except (OSError, ValueError) as e:

@@ -660,7 +660,8 @@ function renderProductCard(product) {
                         if (sug && sug.length > 0 && !URL_TO_GROUP[product.url]) {
                             const p2 = sug[0];
                             const m2 = getMerchant(p2);
-                            return `<button class="inline-flex items-center gap-1 text-xs px-2 py-0.5 mb-2 rounded-full bg-yellow-900/40 border border-yellow-700/50 text-yellow-300 hover:bg-yellow-800/60" onclick="event.preventDefault(); linkFromDashboard('${product.url.replace(/'/g,"\\'")}', '${p2.url.replace(/'/g,"\\'")}')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-1.102-4.899a4 4 0 015.656 0l4 4a4 4 0 01-5.656 5.656l-1.1-1.1"></path></svg> Link with ${m2}</button>`;
+                            const lbl = p2.group_key ? `Add to ${m2} group` : `Link with ${m2}`;
+                            return `<button class="inline-flex items-center gap-1 text-xs px-2 py-0.5 mb-2 rounded-full bg-yellow-900/40 border border-yellow-700/50 text-yellow-300 hover:bg-yellow-800/60" onclick="event.preventDefault(); linkFromDashboard('${product.url.replace(/'/g,"\\'")}', '${p2.url.replace(/'/g,"\\'")}')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-1.102-4.899a4 4 0 015.656 0l4 4a4 4 0 01-5.656 5.656l-1.1-1.1"></path></svg> ${lbl}</button>`;
                         }
                         return '';
                     })()}
@@ -795,13 +796,17 @@ function renderProductRow(product) {
         const partnerMerchant = getMerchant(partner);
         const escapedUrlA = product.url.replace(/'/g, "\\'");
         const escapedUrlB = partner.url.replace(/'/g, "\\'");
+        const label = partner.group_key ? `Add to ${partnerMerchant} group` : `Link with ${partnerMerchant}`;
+        const title = partner.group_key
+            ? `Same product already tracked at ${partnerMerchant} — click to add to existing group`
+            : `Same product found at ${partnerMerchant} — click to group`;
         suggestHtml = `
             <div class="mt-1">
                 <button class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-900/40 border border-yellow-700/50 text-yellow-300 hover:bg-yellow-800/60"
                         onclick="event.preventDefault(); linkFromDashboard('${escapedUrlA}', '${escapedUrlB}')"
-                        title="Same product found at ${partnerMerchant} — click to group">
+                        title="${title}">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-1.102-4.899a4 4 0 015.656 0l4 4a4 4 0 01-5.656 5.656l-1.1-1.1"></path></svg>
-                    Link with ${partnerMerchant}
+                    ${label}
                 </button>
             </div>`;
     }
@@ -1713,10 +1718,14 @@ function loadGroups() {
         SUGGESTED_PAIRS = {};
         const sugg = Array.isArray(suggestData) ? suggestData : (suggestData.items || []);
         sugg.forEach(s => {
+            // Only add suggestion for the ungrouped side (urlA is always ungrouped)
             if (!SUGGESTED_PAIRS[s.urlA]) SUGGESTED_PAIRS[s.urlA] = [];
-            SUGGESTED_PAIRS[s.urlA].push({url: s.urlB, name: s.nameB});
-            if (!SUGGESTED_PAIRS[s.urlB]) SUGGESTED_PAIRS[s.urlB] = [];
-            SUGGESTED_PAIRS[s.urlB].push({url: s.urlA, name: s.nameA});
+            SUGGESTED_PAIRS[s.urlA].push({url: s.urlB, name: s.nameB, group_key: s.group_key || null});
+            // Reverse mapping only for ungrouped↔ungrouped pairs
+            if (!s.group_key) {
+                if (!SUGGESTED_PAIRS[s.urlB]) SUGGESTED_PAIRS[s.urlB] = [];
+                SUGGESTED_PAIRS[s.urlB].push({url: s.urlA, name: s.nameA, group_key: null});
+            }
         });
     }).catch(err => {
         console.error('Failed to load groups:', err);
