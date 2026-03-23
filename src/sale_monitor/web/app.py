@@ -1349,15 +1349,27 @@ def create_app():
     def api_compare_suggest():
         """Suggest likely competitor pairs based on fuzzy name matching.
 
+        Excludes products that are already in a comparison group.
         Returns list of suggestions: [{nameA, urlA, nameB, urlB, similarity}]
         """
         try:
             product_store = flask_app.config['PRODUCT_STORE']
             products = product_store.get_all()
-            # Build normalized names
+            state = flask_app.config['_STATE_CACHE'].get()
+            base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
+
+            # Find URLs already in a group so we can exclude them
+            groups = _build_comparison_groups(state or {}, products or [], base_currency)
+            grouped_urls = set()
+            for g in groups:
+                for it in g.get('items', []):
+                    grouped_urls.add(it.get('url'))
+
+            # Build normalized names, excluding already-grouped products
             items = []
             for p in products:
-                items.append({'url': p.url, 'name': p.name, 'norm': _normalize_name(p.name)})
+                if p.url not in grouped_urls:
+                    items.append({'url': p.url, 'name': p.name, 'norm': _normalize_name(p.name)})
             suggestions = []
             threshold = float(os.getenv('COMPARE_NAME_SIMILARITY', '0.88'))
             # Compare pairs
@@ -1430,6 +1442,31 @@ def create_app():
         except (OSError, ValueError) as e:
             return _safe_error(e)
     
+    @flask_app.route('/api/compare/unlink', methods=['POST'])
+    @require_api_key
+    def api_compare_unlink():
+        """Remove a product from its comparison group.
+
+        Body: { url }
+        """
+        try:
+            data = request.get_json() or {}
+            url = (data.get('url') or '').strip()
+            if not url:
+                return jsonify({'error': 'url required'}), 400
+
+            state = load_state(flask_app.config['STATE_FILE'])
+            st = state.get(url)
+            if not isinstance(st, dict) or not st.get('group_key'):
+                return jsonify({'error': 'Product is not in a group'}), 400
+
+            old_key = st.pop('group_key', None)
+            state[url] = st
+            save_state(flask_app.config['STATE_FILE'], state)
+            return jsonify({'success': True, 'removed_from': old_key})
+        except (OSError, ValueError) as e:
+            return _safe_error(e)
+
     @flask_app.route('/api/failures')
     @require_api_key_for_reads
     def api_failures():
