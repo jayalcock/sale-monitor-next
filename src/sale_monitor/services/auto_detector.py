@@ -10,8 +10,16 @@ class PriceAutoDetector:
     """Attempts to automatically detect price elements on product pages."""
     
     # Common price element patterns (selector, confidence_weight)
+    # Semantic / standards-based selectors first (stable across template changes),
+    # then platform-specific selectors as fallbacks.
     PATTERNS: List[Tuple[str, str, float]] = [
-        # Amazon - high priority, specific selectors
+        # --- Semantic / microdata / data-attribute selectors (most stable) ---
+        ('[itemprop="price"]', 'generic', 0.92),
+        ('[data-price]', 'generic', 0.88),
+        ('[data-product-price]', 'generic', 0.88),
+        ('[data-price-type="finalPrice"]', 'magento', 0.95),
+
+        # --- Amazon ---
         ('.a-price.reinventPricePriceToPayMargin .a-offscreen', 'amazon', 0.98),
         ('.a-price[data-a-color="price"] .a-offscreen', 'amazon', 0.97),
         ('#corePriceDisplay_desktop_feature_div .a-price .a-offscreen', 'amazon', 0.96),
@@ -19,43 +27,35 @@ class PriceAutoDetector:
         ('#priceblock_ourprice', 'amazon', 0.94),
         ('#priceblock_dealprice', 'amazon', 0.94),
         ('span.a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen', 'amazon', 0.93),
-        
-        # Shopify - more specific selectors first
-        # Inverted Shopify theme (JetBlack): price__regular holds sale price when on sale
+
+        # --- Shopify ---
         ('.price.price--on-sale .price__regular', 'shopify', 0.98),
         ('.price__sale .price-item--sale', 'shopify', 0.98),
         ('.price-item--sale', 'shopify', 0.95),
         ('.product-single__price .money', 'shopify', 0.95),
         ('.product__price .money', 'shopify', 0.95),
-        # Added regular (non-sale) price selectors to handle products not currently on sale
         ('.price__regular .price-item--regular', 'shopify', 0.96),
         ('.price-item--regular', 'shopify', 0.95),
         ('.price__regular .price-item--price', 'shopify', 0.94),
-        # Generic price__regular for non-sale or inverted themes
         ('.price__regular', 'shopify', 0.92),
-        ('[data-product-price]', 'shopify', 0.90),
         ('.price--main', 'shopify', 0.90),
         ('.product-price', 'shopify', 0.85),
         ('span.money', 'shopify', 0.80),
-        
-        # WooCommerce
+
+        # --- WooCommerce ---
         ('.woocommerce-Price-amount.amount', 'woocommerce', 0.95),
         ('p.price ins .woocommerce-Price-amount', 'woocommerce', 0.95),
         ('p.price .amount', 'woocommerce', 0.90),
         ('.summary .price', 'woocommerce', 0.85),
-        
-        # BigCommerce
+
+        # --- BigCommerce ---
         ('.productView-price', 'bigcommerce', 0.95),
-        ('[data-product-price]', 'bigcommerce', 0.90),
-        
-        # Magento
-        ('[data-price-type="finalPrice"]', 'magento', 0.95),
+
+        # --- Magento ---
         ('.price-box .price', 'magento', 0.90),
         ('.product-info-price .price', 'magento', 0.85),
-        
-        # Generic patterns (lower confidence)
-        ('[itemprop="price"]', 'generic', 0.80),
-        ('[data-price]', 'generic', 0.75),
+
+        # --- Generic fallbacks ---
         ('.sale-price', 'generic', 0.70),
         ('.final-price', 'generic', 0.70),
         ('.current-price', 'generic', 0.75),
@@ -69,18 +69,28 @@ class PriceAutoDetector:
         self.last_detected_selector: Optional[str] = None
         self.last_confidence: Optional[float] = None
     
+    def detect_price_soup(self, soup: BeautifulSoup) -> Tuple[str, str, float]:
+        """Detect price selector from an already-parsed BeautifulSoup.
+
+        Avoids re-parsing HTML when the caller already has a soup object.
+        """
+        return self._detect_from_soup(soup)
+
     def detect_price(self, html: str) -> Tuple[str, str, float]:
         """
         Try to automatically detect the price selector from HTML.
-        
+
         Args:
             html: Raw HTML content of the product page
-            
+
         Returns:
             Tuple of (selector, platform, confidence) if found, or ('', '', 0.0) if not found
         """
         soup = BeautifulSoup(html, 'html.parser')
+        return self._detect_from_soup(soup)
 
+    def _detect_from_soup(self, soup: BeautifulSoup) -> Tuple[str, str, float]:
+        """Shared detection logic operating on a parsed soup."""
         # Pass 1: strict price validation
         result = self._scan_patterns(soup, strict=True)
         if result:

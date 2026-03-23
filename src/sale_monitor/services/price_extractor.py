@@ -81,8 +81,8 @@ class PriceExtractor:
                         continue
                 
                 soup = BeautifulSoup(resp.text, "html.parser")
-                
-                # Try manual selector first if provided
+
+                # 1) Try manual selector first if provided
                 if selector:
                     el = soup.select_one(selector)
                     if el:
@@ -93,10 +93,16 @@ class PriceExtractor:
                         logging.warning("Failed to parse price from manual selector: %s", text)
                     else:
                         logging.warning("Manual selector not found: %s on %s", selector, url)
-                
-                # Try auto-detection if manual failed or no selector provided
-                detected_selector, platform, confidence = self.auto_detector.detect_price(resp.text)
-                logging.debug("Auto-detector returned: selector='%s', platform='%s', confidence=%.2f", 
+
+                # 2) Try JSON-LD structured data (most reliable — retailer-provided)
+                price_jsonld = self._extract_price_from_jsonld(resp.text)
+                if price_jsonld is not None:
+                    logging.info("Extracted price from JSON-LD on %s", url)
+                    return price_jsonld, 'auto'
+
+                # 3) Try CSS auto-detection (reuse already-parsed soup)
+                detected_selector, platform, confidence = self.auto_detector.detect_price_soup(soup)
+                logging.debug("Auto-detector returned: selector='%s', platform='%s', confidence=%.2f",
                             detected_selector, platform, confidence)
                 if detected_selector:
                     el = soup.select_one(detected_selector)
@@ -107,22 +113,16 @@ class PriceExtractor:
                         price = self._parse_price(text)
                         logging.debug("Parsed price: %s", price)
                         if price is not None:
-                            logging.info("Auto-detected price on %s using %s selector (confidence: %.0f%%)", 
+                            logging.info("Auto-detected price on %s using %s selector (confidence: %.0f%%)",
                                        url, platform, confidence * 100)
                             return price, 'auto'
                         logging.warning("Auto-detected selector found but failed to parse price: %s", text)
                     else:
                         logging.warning("Auto-detected selector not found in soup: %s", detected_selector)
-                
-                # Both methods failed
-                logging.warning("Failed to extract price from %s (selector: %s, auto-detection: %s)", 
-                              url, selector or "none", "failed" if not detected_selector else "parse failed")
 
-                # Fallback: try JSON-LD structured data for price (e.g., many retailers incl. JensonUSA)
-                price_jsonld = self._extract_price_from_jsonld(resp.text)
-                if price_jsonld is not None:
-                    logging.info("Extracted price from JSON-LD on %s", url)
-                    return price_jsonld, 'auto'
+                # All methods failed
+                logging.warning("Failed to extract price from %s (selector: %s, auto-detection: %s)",
+                              url, selector or "none", "failed" if not detected_selector else "parse failed")
                 
             except requests.exceptions.RequestException as e:
                 logging.error("Request failed (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
@@ -350,16 +350,31 @@ class PriceExtractor:
         if not s:
             return None
 
-        # If both separators exist, assume comma is thousands and dot is decimal (e.g., 1,234.56)
+        # If both separators exist, the last one is the decimal separator.
+        # e.g., "1,234.56" or "1.234,56"
         if "," in s and "." in s:
-            s = s.replace(",", "")
+            last_comma = s.rfind(",")
+            last_dot = s.rfind(".")
+            if last_comma > last_dot:
+                # European: dot is thousands, comma is decimal (1.234,56)
+                s = s.replace(".", "").replace(",", ".")
+            else:
+                # English: comma is thousands, dot is decimal (1,234.56)
+                s = s.replace(",", "")
             try:
                 return float(s)
             except ValueError:
                 return None
-        # If only comma exists, treat comma as decimal (e.g., 19,99 -> 19.99)
-        if "," in s and "." not in s:
-            s = s.replace(",", ".")
+
+        # Only comma, no dot
+        if "," in s:
+            # Comma followed by exactly 3 digits at the end → thousands separator
+            # e.g., "1,234" = 1234, not 1.234
+            if re.search(r",\d{3}$", s):
+                s = s.replace(",", "")
+            else:
+                # Likely decimal: "19,99" → 19.99
+                s = s.replace(",", ".")
             try:
                 return float(s)
             except ValueError:
