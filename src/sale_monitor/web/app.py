@@ -954,8 +954,7 @@ def create_app():
                     if currency == base_currency:
                         price_in_base = price
                     else:
-                        history = PriceHistory(flask_app.config['HISTORY_DB'])
-                        ex_service = ExchangeRateService(cache_handler=history)
+                        ex_service = flask_app.config['_EX_SERVICE']
                         converted = ex_service.convert(float(price), currency, base_currency)
                         price_in_base = converted if converted is not None else None
                     
@@ -976,8 +975,7 @@ def create_app():
                     save_state(flask_app.config['STATE_FILE'], state)
                     
                     # Record in history
-                    history = PriceHistory(flask_app.config['HISTORY_DB'])
-                    history.record_price(new_product.url, new_product.name, price, status='success', currency=currency, price_cad=price_in_base)
+                    flask_app.config['_HISTORY'].record_price(new_product.url, new_product.name, price, status='success', currency=currency, price_cad=price_in_base)
                     
                     logging.info(f"Auto-checked new product '{new_product.name}': ${price} {currency}")
                 else:
@@ -1632,8 +1630,7 @@ def create_app():
         """
         try:
             days = int(request.args.get('days', 30))
-            history = PriceHistory(flask_app.config['HISTORY_DB'])
-            ex_service = ExchangeRateService(cache_handler=history)
+            history = flask_app.config['_HISTORY']
             base_currency = get_base_currency(flask_app.config['CONFIG_FILE']).upper()
             # Prefer names from products DB
             try:
@@ -1646,87 +1643,44 @@ def create_app():
             # Restrict to current product URLs when available
             url_filter = set(name_by_url.keys()) if name_by_url else None
 
-            # Single bulk query for all products' history
-            all_history = history.get_all_history_extended(days=days, url_filter=url_filter)
-
-            # Always downsample to one record per product per day (latest
-            # successful) to keep payloads manageable.  With frequent checks
-            # (~every 2 min) the raw data can be thousands of rows per product
-            # per week, most with identical prices.
-            downsample = True
+            # Downsampled query: one record per product per day (latest
+            # successful), done in SQL to avoid pulling 90K+ rows into Python.
+            daily = history.get_daily_history(days=days, url_filter=url_filter)
 
             result = []
-            # If DB has no history but we have products, try state fallback
-            urls_to_process = set(all_history.keys())
+            urls_to_process = set(daily.keys())
             if name_by_url:
                 urls_to_process |= set(name_by_url.keys())
 
             for url in urls_to_process:
                 if name_by_url and url not in name_by_url:
                     continue
-                records = all_history.get(url)
-                if not records:
+                day_records = daily.get(url)
+                if not day_records:
                     # Fallback: synthesize a single point from current state
                     try:
                         st = flask_app.config['_STATE_CACHE'].get().get(url)
                         if st and 'current_price' in st:
                             cur = st.get('current_price')
                             cur_currency = (st.get('currency') or 'CAD').upper()
-                            records = [
-                                (st.get('last_checked') or datetime.now(timezone.utc).isoformat(), cur, 'success', cur_currency, None)
+                            day_records = [
+                                (st.get('last_checked') or datetime.now(timezone.utc).isoformat(), cur, cur_currency, None)
                             ]
                         else:
                             continue
                     except (ValueError, TypeError, sqlite3.Error, requests.exceptions.RequestException):
                         continue
-                # Choose display name: prefer CSV; else DB name from records
                 display_name = name_by_url.get(url, url)
-                try:
-                    if display_name is not None and str(display_name).strip() != "":
-                        _ = float(str(display_name))
-                        display_name = name_by_url.get(url, url)
-                except ValueError:
-                    pass
-
-                # Build series, optionally downsampling to one point per day
-                if downsample:
-                    # Keep latest success per day
-                    day_best = {}
-                    for (ts, price, status, currency, stored_cad) in records:
-                        if status != 'success' or price is None:
-                            continue
-                        day = ts[:10]
-                        if day not in day_best:
-                            day_best[day] = (ts, price, currency, stored_cad)
-                    day_records = sorted(day_best.values(), key=lambda r: r[0])
-                else:
-                    day_records = [
-                        (ts, price, currency, stored_cad)
-                        for (ts, price, status, currency, stored_cad) in records
-                        if status == 'success' and price is not None
-                    ]
 
                 series = []
                 for (ts, price, currency, stored_cad) in day_records:
-                    # Prefer stored base-currency price (recorded at check time).
-                    # Fall back to live conversion for legacy records.
                     price_in_base = None
                     try:
                         if stored_cad is not None:
-                            price_in_base = float(stored_cad)
-                        elif currency:
-                            if currency.upper() == base_currency:
-                                price_in_base = price
-                            else:
-                                converted_base = ex_service.convert(float(price), currency.upper(), base_currency)
-                                price_in_base = converted_base if converted_base is not None else None
+                            price_in_base = round(float(stored_cad), 2)
+                        elif currency and currency.upper() == base_currency:
+                            price_in_base = price
                     except (ValueError, TypeError):
-                        pass
-
-                    try:
-                        if price_in_base is not None:
-                            price_in_base = round(float(price_in_base), 2)
-                    except (TypeError, ValueError):
                         pass
 
                     series.append({

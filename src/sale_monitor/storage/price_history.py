@@ -302,6 +302,55 @@ class PriceHistory:
 
             return result
 
+    def get_daily_history(
+        self,
+        days: Optional[int] = None,
+        url_filter: Optional[set] = None,
+    ) -> dict:
+        """Fetch one record per product per day (latest successful check).
+
+        Performs downsampling in SQL so Python never sees the full row set.
+        Returns dict mapping product_url -> list of (timestamp, price, currency, price_cad).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conditions = ["check_status = 'success'"]
+            params: list = []
+
+            if days is not None:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                conditions.append("timestamp >= ?")
+                params.append(cutoff)
+
+            where = "WHERE " + " AND ".join(conditions)
+
+            query = f"""
+                SELECT product_url, timestamp, price, currency, price_cad
+                FROM price_history
+                {where}
+                  AND rowid IN (
+                    SELECT rowid FROM (
+                      SELECT rowid, ROW_NUMBER() OVER (
+                        PARTITION BY product_url, SUBSTR(timestamp, 1, 10)
+                        ORDER BY timestamp DESC
+                      ) AS rn
+                      FROM price_history
+                      {where}
+                    ) WHERE rn = 1
+                  )
+                ORDER BY product_url, timestamp
+            """
+            # params used twice (outer + subquery)
+            cursor = conn.execute(query, params + params)
+
+            result: dict = {}
+            for row in cursor:
+                url = row[0]
+                if url_filter is not None and url not in url_filter:
+                    continue
+                result.setdefault(url, []).append((row[1], row[2], row[3], row[4]))
+
+            return result
+
     def get_price_changes(
         self, 
         product_url: str, 
