@@ -428,6 +428,29 @@ class PriceHistory:
                 }
             return result
 
+    def get_recent_success_batch(self, product_urls: list, n: int = 3) -> dict:
+        """Check if the last N checks for each product were all successes.
+
+        Returns dict mapping product_url -> True if last N checks are all
+        'success', False otherwise.  Products with fewer than N checks are
+        considered not-all-success.
+        """
+        if not product_urls:
+            return {}
+
+        result = {}
+        with sqlite3.connect(self.db_path) as conn:
+            for url in product_urls:
+                rows = conn.execute(
+                    "SELECT check_status FROM price_history "
+                    "WHERE product_url = ? ORDER BY timestamp DESC LIMIT ?",
+                    (url, n),
+                ).fetchall()
+                result[url] = (
+                    len(rows) >= n and all(r[0] == "success" for r in rows)
+                )
+        return result
+
     def get_max_prices_batch(self, product_urls: list, days: Optional[int] = None) -> dict:
         """Get max successful price per product in a single query.
 

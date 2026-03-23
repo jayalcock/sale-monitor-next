@@ -1190,6 +1190,8 @@ def create_app():
             enabled_products = [p for p in products if p.enabled]
             enabled_urls = [p.url for p in enabled_products]
             batch_failure = history.get_failure_stats_batch(enabled_urls, days=7)
+            # Check if the last 3 checks succeeded (suppresses alert for fixed products)
+            batch_recent_status = history.get_recent_success_batch(enabled_urls, n=3)
             discount_urls = [p.url for p in enabled_products if p.discount_threshold]
             batch_max = history.get_max_prices_batch(discount_urls, days=30) if discount_urls else {}
 
@@ -1231,8 +1233,10 @@ def create_app():
                         })
 
                 # Check for high failure rate (last 7 days) — from batch result
+                # Suppress if the most recent checks are all successes (problem is fixed)
                 failure_stats = batch_failure.get(p.url)
-                if failure_stats and (failure_stats['total_checks'] >= min_checks and
+                recent_ok = batch_recent_status.get(p.url, False)
+                if not recent_ok and failure_stats and (failure_stats['total_checks'] >= min_checks and
                     failure_stats['failure_rate'] >= failure_threshold):
                     alerts.append({
                         'name': p.name,
