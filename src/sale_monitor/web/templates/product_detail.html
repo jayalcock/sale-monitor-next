@@ -141,6 +141,7 @@ let CURRENT_BASE_CURRENCY = 'CAD';
 let allProducts = [];
 let currentProductIndex = -1;
 let RESOLVED_URL = null; // canonical URL found in products.csv
+let NAV_ITEMS = []; // deduplicated navigation list (groups collapsed to one entry)
 
 function parseUtcIso(dateStr) {
     if (!dateStr) return null;
@@ -226,38 +227,38 @@ function resolveProductUrl(rawUrl) {
         });
 }
 
+function navItemHref(item) {
+    let href = `/product/detail?url=${encodeURIComponent(item.url)}`;
+    if (item.group_key) href += `&group_key=${encodeURIComponent(item.group_key)}`;
+    return href;
+}
+
 function setupNavigation() {
     const navButtons = document.getElementById('nav-buttons');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const positionSpan = document.getElementById('product-position');
-    
-    if (allProducts.length <= 1) {
+
+    if (NAV_ITEMS.length <= 1) {
         navButtons.style.display = 'none';
         return;
     }
-    
+
     navButtons.style.display = 'inline-block';
-    
-    // Update position display
-    positionSpan.textContent = `${currentProductIndex + 1} / ${allProducts.length}`;
-    
-    // Enable/disable buttons based on position
+    positionSpan.textContent = `${currentProductIndex + 1} / ${NAV_ITEMS.length}`;
+
     prevBtn.disabled = currentProductIndex <= 0;
-    nextBtn.disabled = currentProductIndex >= allProducts.length - 1;
-    
-    // Setup click handlers
+    nextBtn.disabled = currentProductIndex >= NAV_ITEMS.length - 1;
+
     prevBtn.onclick = () => {
         if (currentProductIndex > 0) {
-            const prevProduct = allProducts[currentProductIndex - 1];
-            window.location.href = `/product/detail?url=${encodeURIComponent(prevProduct.url)}`;
+            window.location.href = navItemHref(NAV_ITEMS[currentProductIndex - 1]);
         }
     };
-    
+
     nextBtn.onclick = () => {
-        if (currentProductIndex < allProducts.length - 1) {
-            const nextProduct = allProducts[currentProductIndex + 1];
-            window.location.href = `/product/detail?url=${encodeURIComponent(nextProduct.url)}`;
+        if (currentProductIndex < NAV_ITEMS.length - 1) {
+            window.location.href = navItemHref(NAV_ITEMS[currentProductIndex + 1]);
         }
     };
 }
@@ -288,19 +289,49 @@ function formatPriceDetailed(product) {
 // formatDate - provided by base.html
 
 function loadProductInfo(url) {
-    fetch(`/api/products`)
-        .then(response => {
-            if (!response.ok) throw new Error('Failed to fetch product info');
-            return response.json();
-        })
-        .then(resp => {
+    Promise.all([
+        fetch('/api/products').then(r => r.ok ? r.json() : Promise.reject('Failed to fetch products')),
+        fetch('/api/compare/groups').then(r => r.ok ? r.json() : {items:[]}).catch(() => ({items:[]})),
+    ])
+        .then(([resp, groupResp]) => {
             const products = Array.isArray(resp) ? resp : (resp.items || []);
             allProducts = products;
+            const groups = Array.isArray(groupResp) ? groupResp : (groupResp.items || []);
+
+            // Build URL→group_key lookup
+            const urlToGroup = {};
+            const groupPrimary = {}; // group_key → primary URL (first item)
+            groups.forEach(g => {
+                const primary = (g.items && g.items[0]) ? g.items[0].url : null;
+                if (primary) groupPrimary[g.group_key] = primary;
+                (g.items || []).forEach(it => { urlToGroup[it.url] = g.group_key; });
+            });
+
+            // Build deduplicated nav list: ungrouped products as-is,
+            // grouped products collapsed to one entry per group
+            NAV_ITEMS = [];
+            const seenGroups = new Set();
+            products.forEach(p => {
+                const gk = urlToGroup[p.url];
+                if (gk) {
+                    if (!seenGroups.has(gk)) {
+                        seenGroups.add(gk);
+                        const primaryUrl = groupPrimary[gk] || p.url;
+                        NAV_ITEMS.push({url: primaryUrl, group_key: gk, name: p.name});
+                    }
+                } else {
+                    NAV_ITEMS.push({url: p.url, group_key: null, name: p.name});
+                }
+            });
+
             const product = products.find(p => p.url === url);
             if (!product) throw new Error('Product not found');
-            
-            // Find current product index and setup navigation
-            currentProductIndex = products.findIndex(p => p.url === url);
+
+            // Find position in deduplicated nav list
+            const currentGroupKey = getUrlParameter('group_key') || urlToGroup[url] || null;
+            currentProductIndex = NAV_ITEMS.findIndex(n =>
+                currentGroupKey ? n.group_key === currentGroupKey : n.url === url
+            );
             setupNavigation();
             
             // Capture base currency
