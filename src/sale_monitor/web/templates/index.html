@@ -1479,9 +1479,13 @@ function checkPrice(url, btn) {
                 allProducts[idx].currency = result.currency || allProducts[idx].currency;
                 if (result.price_in_base != null) allProducts[idx].price_in_base = result.price_in_base;
                 allProducts[idx].last_checked = result.last_checked || new Date().toISOString();
+                // Clear stale failure alert for this product since the check just succeeded
+                delete productAlerts[url];
                 renderProducts();
                 renderSparklines();
                 updateLastUpdate(allProducts);
+                // Re-fetch alerts in background so badge counts stay current
+                updateAlertsBadge();
             } else {
                 loadProducts();
             }
