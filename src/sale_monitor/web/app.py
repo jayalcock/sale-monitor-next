@@ -312,11 +312,6 @@ def create_app():
         """Price alerts dashboard page."""
         return render_template('alerts.html')
 
-    @flask_app.route('/compare')
-    def compare():
-        """Competitive comparison page."""
-        return render_template('compare.html')
-    
     @flask_app.route('/failures')
     def failures():
         """Failure diagnostics page."""

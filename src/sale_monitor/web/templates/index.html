@@ -1753,7 +1753,6 @@ function renderGroupParentRow(group) {
         : `<span class="text-primary-300 font-medium">${escapeHtml(String(groupName))}</span>`;
     const escapedKey = escapeHtml(group.group_key).replace(/'/g, "\\'");
     const googleQuery = encodeURIComponent(groupName);
-    const compareUrl = `/compare#group=${encodeURIComponent(group.group_key)}`;
     return `
         <tr data-product-name="${escapeHtml(String(groupName)).toLowerCase()}" 
             data-status="enabled" data-alert="normal" data-price="${m.lowest ? m.lowest._pb : 0}" data-merchant="group" class="hover:bg-gray-700">
@@ -1765,8 +1764,7 @@ function renderGroupParentRow(group) {
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkGroupPrices(this, '${escapedKey}')">🔄 Check All</button>
-                    <a href="https://www.google.com/search?tbm=shop&q=${googleQuery}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
-                    <a href="${compareUrl}" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium rounded-r-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">📊 Compare</a>
+                    <a href="https://www.google.com/search?tbm=shop&q=${googleQuery}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium rounded-r-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
                 </div>
             </td>
         </tr>

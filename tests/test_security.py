@@ -114,7 +114,7 @@ def test_no_api_key_env_means_auth_disabled(tmp_path):
 
 def test_template_pages_not_gated_by_auth(tmp_path):
     client = make_client(tmp_path, api_key="test-secret-key")
-    for path in ("/", "/manage", "/alerts", "/compare", "/failures"):
+    for path in ("/", "/manage", "/alerts", "/failures"):
         resp = client.get(path)
         assert resp.status_code == 200, f"{path} returned {resp.status_code}"
 
