@@ -732,6 +732,60 @@ function renderProductCard(product) {
     `;
 }
 
+function renderGroupCard(group) {
+    const m = computeGroupMetrics(group);
+    const groupName = (group.items && group.items[0] && group.items[0].name) ? group.items[0].name : group.group_key;
+    const bestItem = m.lowest || (group.items && group.items[0]) || {};
+    const primaryUrl = bestItem.url || '';
+    const historyUrl = `/product/detail?group_key=${encodeURIComponent(group.group_key)}&url=${encodeURIComponent(primaryUrl)}`;
+    const lowestStr = m.lowest ? formatBasePrice(m.lowest._pb) : '<span class="text-gray-500">N/A</span>';
+    const vendorBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">${(group.items||[]).length} vendors</span>`;
+    const savingsBadge = m.spread > 0 ? ` <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">Save $${m.spread.toFixed(2)}</span>` : '';
+    const escapedKey = escapeHtml(group.group_key).replace(/'/g, "\\'");
+    const escapedGroupName = escapeHtml(String(groupName)).replace(/'/g, "\\'");
+    const buyName = (bestItem.name || groupName).replace(/'/g, "\\'");
+    const buyPrice = bestItem.current_price || bestItem._pb || 'null';
+    const buyCurrency = bestItem.currency || 'CAD';
+    const googleQuery = encodeURIComponent(groupName);
+    const merchantList = (group.items || []).map(it => `<a href="${it.url}" target="_blank" class="text-primary-400 hover:text-primary-300 underline">${getMerchant(it)}</a>`).join(', ');
+
+    return `
+        <div class="col" data-product-name="${escapeHtml(String(groupName)).toLowerCase()}"
+             data-product-url="${encodeURIComponent(primaryUrl)}"
+             data-status="enabled"
+             data-alert="normal"
+             data-price="${m.lowest ? m.lowest._pb : 0}"
+             data-merchant="group">
+            <div class="bg-gray-800 rounded-lg shadow-sm overflow-hidden transition-transform hover:-translate-y-1 h-full flex flex-col border border-gray-700">
+                <div class="product-card-image-wrapper">
+                    <div class="placeholder-image">
+                        <div class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-r-transparent align-[-0.125em] text-gray-400" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-4 flex flex-col flex-grow">
+                    <h5 class="text-lg font-semibold mb-2">
+                        <a href="${historyUrl}" class="text-white hover:text-primary-400">${escapeHtml(String(groupName))}</a>
+                    </h5>
+                    <div class="text-sm text-gray-400 mb-1">${merchantList}</div>
+                    <div class="text-2xl font-bold text-white mb-3">${lowestStr}</div>
+                    <div class="mb-2"><canvas class="sparkline" data-url="${encodeURIComponent(primaryUrl)}" width="160" height="32"></canvas></div>
+                    <div class="mb-3 flex gap-2 flex-wrap">
+                        ${vendorBadge}${savingsBadge}
+                    </div>
+                    <div class="mt-auto flex flex-col gap-2">
+                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-primary-600 text-sm font-medium rounded-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-primary-500" onclick="checkGroupPrices(this, '${escapedKey}')">🔄 Check All</button>
+                        <a href="https://www.google.com/search?tbm=shop&q=${googleQuery}" target="_blank" rel="noopener" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500">🔍 Find Elsewhere</a>
+                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-green-600 text-sm font-medium rounded-md text-green-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-green-500" onclick="markPurchased('${primaryUrl}', '${buyName}', ${buyPrice}, '${buyCurrency}')">💰 Purchased</button>
+                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-red-500" onclick="deleteGroup('${escapedKey}', '${escapedGroupName}')">🗑️ Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function loadCardImages() {
     // Lazy-load images using IntersectionObserver
     const cols = document.querySelectorAll('#products-cards [data-product-url]');
@@ -1006,7 +1060,27 @@ function renderProducts() {
         } else {
             tableContainer.style.display = 'none';
             cardsContainerWrapper.style.display = 'block';
-            cardsContainer.innerHTML = visible.map(renderProductCard).join('');
+            // Build cards with group collapsing
+            const cards = [];
+            const renderedCardGroups = new Set();
+            visible.forEach(p => {
+                const gKey = URL_TO_GROUP[p.url];
+                if (gKey) {
+                    const primaryUrl = GROUP_PRIMARY_URL[gKey];
+                    if (p.url === primaryUrl && !renderedCardGroups.has(gKey)) {
+                        const group = findGroupByKey(gKey);
+                        if (group) {
+                            cards.push(renderGroupCard(group));
+                            renderedCardGroups.add(gKey);
+                        } else {
+                            cards.push(renderProductCard(p));
+                        }
+                    }
+                } else {
+                    cards.push(renderProductCard(p));
+                }
+            });
+            cardsContainer.innerHTML = cards.join('');
             // Show More button for cards
             let showMoreEl = document.getElementById('cards-show-more');
             if (hasMore) {
