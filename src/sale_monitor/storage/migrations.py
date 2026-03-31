@@ -94,11 +94,35 @@ def _migration_4_backfill_price_cad(conn: sqlite3.Connection) -> None:
         logger.info("Backfilled %d %s rows with rate %s", updated, cur, rate)
 
 
+def _migration_5_create_purchases_table(conn: sqlite3.Connection) -> None:
+    """Create purchases table for tracking bought items and savings."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS purchases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_url TEXT NOT NULL,
+            product_name TEXT NOT NULL,
+            purchase_price REAL NOT NULL,
+            currency TEXT DEFAULT 'CAD',
+            purchase_price_base REAL,
+            reference_price REAL,
+            reference_price_base REAL,
+            savings_base REAL,
+            purchased_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            notes TEXT DEFAULT ''
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_purchases_url ON purchases(product_url)"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     (1, "composite index on product_url+timestamp", _migration_1_add_last_checked_index),
     (2, "index on check_status", _migration_2_add_status_index),
     (3, "create products table", _migration_3_create_products_table),
     (4, "backfill NULL price_cad with approximate rates", _migration_4_backfill_price_cad),
+    (5, "create purchases table", _migration_5_create_purchases_table),
 ]
 
 

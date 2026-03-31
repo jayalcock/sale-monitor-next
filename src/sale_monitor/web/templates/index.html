@@ -27,12 +27,12 @@
                 </svg>
                 <span class="hidden sm:inline">Update All</span><span class="sm:hidden">Update</span>
             </button>
-            <a href="/manage" class="inline-flex items-center px-3 sm:px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 min-h-[44px]">
+            <button onclick="openAddProductModal()" class="inline-flex items-center px-3 sm:px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 min-h-[44px]">
                 <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
                 <span class="hidden sm:inline">Add Product</span><span class="sm:hidden">Add</span>
-            </a>
+            </button>
         </div>
     </div>
 
@@ -51,6 +51,8 @@
             <span class="text-gray-400">Alerts: <a href="/alerts" id="hw-alerts" class="text-primary-400 hover:text-primary-300 font-medium">--</a></span>
             <span class="text-gray-500 hidden sm:inline">|</span>
             <span class="text-gray-400">Rates: <span id="hw-rates" class="text-white font-medium">--</span></span>
+            <span class="text-gray-500 hidden sm:inline" id="hw-savings-sep" style="display:none">|</span>
+            <span class="text-gray-400" id="hw-savings-wrap" style="display:none">Savings: <a href="/savings" id="hw-savings" class="text-green-400 hover:text-green-300 font-medium">--</a></span>
         </div>
     </div>
 
@@ -208,12 +210,12 @@
         <h3 class="mt-2 text-sm font-medium text-white">No products</h3>
         <p class="mt-1 text-sm text-gray-400">Get started by adding a new product.</p>
         <div class="mt-6">
-            <a href="/manage" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
+            <button onclick="openAddProductModal()" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
                 Add Product
-            </a>
+            </button>
         </div>
     </div>
 </div>
@@ -400,6 +402,50 @@
     border-color: #0ea5e9;
 }
 </style>
+
+<!-- Add Product Modal -->
+<div id="addProductModal" class="fixed inset-0 z-50 hidden overflow-y-auto">
+    <div class="fixed inset-0 bg-black/60" onclick="closeAddProductModal()"></div>
+    <div class="relative flex min-h-full items-start justify-center p-4">
+        <div class="relative w-full max-w-lg my-10 bg-gray-800 border border-gray-700 rounded-lg shadow">
+            <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 class="text-lg font-semibold text-white">Add New Product</h3>
+                <button class="text-gray-300 hover:text-white" onclick="closeAddProductModal()">&#x2715;</button>
+            </div>
+            <div class="p-4">
+                <div id="dashAddProductForm" class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Product URL *</label>
+                        <div class="mt-1 flex items-center gap-2">
+                            <input type="text" class="flex-1 bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" id="dash-add-url" placeholder="https://...">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Product Name *</label>
+                        <div class="mt-1 flex items-center gap-2">
+                            <input type="text" class="flex-1 bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" id="dash-add-name">
+                            <button class="inline-flex items-center px-3 py-2 rounded-md border border-gray-600 text-gray-200 hover:bg-gray-700 text-sm" type="button" id="dash-fetch-name-btn" onclick="dashFetchProductName()" title="Fetch name from URL">&#x2193;</button>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">Auto-filled from URL when available.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-200">Tags <span class="text-gray-400">(comma-separated, optional)</span></label>
+                        <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" id="dash-add-tags" placeholder="e.g., wishlist, bikes">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" class="h-4 w-4 text-primary-600 bg-gray-700 border-gray-600 rounded" id="dash-add-enabled" checked>
+                        <label class="text-sm text-gray-200">Enabled</label>
+                    </div>
+                    <p class="text-xs text-gray-400">For advanced options (selector, alerts, groups), use the <a href="/manage" class="text-primary-400 hover:text-primary-300">Manage</a> page.</p>
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-2 p-4 border-t border-gray-700">
+                <button type="button" class="inline-flex items-center px-3 py-2 rounded-md bg-gray-700 text-white hover:bg-gray-600 text-sm" onclick="closeAddProductModal()">Cancel</button>
+                <button type="button" class="inline-flex items-center px-3 py-2 rounded-md bg-primary-600 text-white hover:bg-primary-700 text-sm" onclick="dashAddProduct()">Add Product</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -677,6 +723,7 @@ function renderProductCard(product) {
                     <div class="mt-auto flex flex-col gap-2">
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-primary-600 text-sm font-medium rounded-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check Price</button>
                         <a href="${googleShoppingUrl(product)}" target="_blank" rel="noopener" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-gray-500">🔍 Find Elsewhere</a>
+                        <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-green-600 text-sm font-medium rounded-md text-green-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-green-500" onclick="markPurchased('${product.url}', '${product.name.replace(/'/g, "\\'")}', ${product.current_price || 'null'}, '${product.currency || 'CAD'}')">💰 Purchased</button>
                         <button class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                     </div>
                 </div>
@@ -831,6 +878,7 @@ function renderProductRow(product) {
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkPrice('${product.url}', this)">🔄 Check</button>
                     <a href="${googleShoppingUrl(product)}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
+                    <button class="inline-flex items-center px-3 py-2 border border-green-600 border-l-0 text-sm font-medium text-green-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-green-500" onclick="markPurchased('${product.url}', '${product.name.replace(/'/g, "\\'")}', ${product.current_price || 'null'}, '${product.currency || 'CAD'}')">💰 Buy</button>
                     <button class="inline-flex items-center px-3 py-2 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-red-500" onclick="deleteProduct('${product.url}', '${product.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
             </td>
@@ -1069,6 +1117,23 @@ function colorForIndex(i) {
     return `hsl(${hue}, 70%, 50%)`;
 }
 
+function rescaleY(chart) {
+    if (!chart || chart.options.scales.y.type === 'logarithmic') return;
+    let lo = Infinity, hi = -Infinity;
+    chart.data.datasets.forEach((ds, i) => {
+        if (chart.getDatasetMeta(i).hidden) return;
+        ds.data.forEach(v => {
+            if (v == null) return;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        });
+    });
+    if (lo === Infinity) return;
+    const r = hi - lo || 1;
+    chart.options.scales.y.min = lo - r * 0.08;
+    chart.options.scales.y.max = hi + r * 0.08;
+}
+
 function loadTrends() {
     const days = document.getElementById('trend-days').value || 30;
     const modeEl = document.getElementById('trend-mode');
@@ -1189,6 +1254,7 @@ function loadTrends() {
                     backgroundColor: color.replace('70%', '70%').replace('50%', '80%'),
                     spanGaps: true,
                     tension: 0.15,
+                    hidden: hiddenTrendLabels.has(item.name),
                     // Hide points by default; show them only on hover for clarity
                     pointRadius: 0,
                     pointHoverRadius: 6,
@@ -1210,6 +1276,22 @@ function loadTrends() {
                     ctx.restore();
                 }
             };
+            // Compute y-axis bounds from visible datasets only
+            let yMin = Infinity, yMax = -Infinity;
+            datasets.forEach(ds => {
+                if (ds.hidden) return;
+                ds.data.forEach(v => {
+                    if (v == null) return;
+                    if (v < yMin) yMin = v;
+                    if (v > yMax) yMax = v;
+                });
+            });
+            if (yMin === Infinity) { yMin = 0; yMax = 1; }
+            const yRange = yMax - yMin || 1;
+            const yPad = yRange * 0.08;
+            yMin -= yPad;
+            yMax += yPad;
+
             // Force single-point hover by activating only the nearest point under the cursor
             const singlePointHoverPlugin = {
                 id: 'singlePointHover',
@@ -1276,6 +1358,7 @@ function loadTrends() {
                         if (visibleCount === 1 && !clickedHidden) {
                             // Only this one visible — restore all
                             chart.data.datasets.forEach((d, i) => {
+                                d.hidden = false;
                                 chart.getDatasetMeta(i).hidden = false;
                                 hiddenTrendLabels.delete(d.label);
                             });
@@ -1284,6 +1367,7 @@ function loadTrends() {
                             // All visible — solo this one
                             chart.data.datasets.forEach((d, i) => {
                                 const hide = i !== clickedIdx;
+                                d.hidden = hide;
                                 chart.getDatasetMeta(i).hidden = hide;
                                 if (hide) { hiddenTrendLabels.add(d.label); } else { hiddenTrendLabels.delete(d.label); }
                             });
@@ -1295,12 +1379,14 @@ function loadTrends() {
                             const meta = chart.getDatasetMeta(clickedIdx);
                             if (!meta.hidden && visibleCount <= 1) { chart.update(); return; }
                             meta.hidden = !meta.hidden;
+                            chart.data.datasets[clickedIdx].hidden = meta.hidden;
                             if (meta.hidden) { hiddenTrendLabels.add(chart.data.datasets[clickedIdx].label); } else { hiddenTrendLabels.delete(chart.data.datasets[clickedIdx].label); }
                             if (container) container.querySelectorAll('.trends-legend-item').forEach(el => {
                                 const i = parseInt(el.dataset.index);
                                 el.classList.toggle('hidden-dataset', chart.getDatasetMeta(i).hidden);
                             });
                         }
+                        rescaleY(chart);
                         chart.update();
                     },
                     scales: {
@@ -1318,8 +1404,9 @@ function loadTrends() {
                             }
                         },
                         y: {
-                            beginAtZero: false,
                             type: (mode === 'log') ? 'logarithmic' : 'linear',
+                            min: (mode === 'log') ? undefined : yMin,
+                            max: (mode === 'log') ? undefined : yMax,
                             grid: {
                                 color: '#374151',
                                 drawBorder: false
@@ -1347,14 +1434,6 @@ function loadTrends() {
             function fontSizeForDevice() {
                 return { size: isMobile() ? 12 : 14 };
             }
-
-            // Restore hidden state from previous selection & build legend
-            trendsChart.data.datasets.forEach((ds, i) => {
-                if (hiddenTrendLabels.has(ds.label)) {
-                    trendsChart.getDatasetMeta(i).hidden = true;
-                }
-            });
-            trendsChart.update('none');
             renderTrendsLegend(trendsChart);
             document.getElementById('trends-chart-loader')?.classList.add('hidden');
         })
@@ -1404,6 +1483,7 @@ function renderTrendsLegend(chart) {
             if (visibleCount === 1 && !clickedHidden) {
                 // Only this one visible — restore all
                 chart.data.datasets.forEach((d, i) => {
+                    d.hidden = false;
                     chart.getDatasetMeta(i).hidden = false;
                     hiddenTrendLabels.delete(d.label);
                 });
@@ -1412,6 +1492,7 @@ function renderTrendsLegend(chart) {
                 // All visible — solo this one
                 chart.data.datasets.forEach((d, i) => {
                     const hide = i !== idx;
+                    d.hidden = hide;
                     chart.getDatasetMeta(i).hidden = hide;
                     if (hide) { hiddenTrendLabels.add(d.label); } else { hiddenTrendLabels.delete(d.label); }
                 });
@@ -1424,9 +1505,11 @@ function renderTrendsLegend(chart) {
                 // Don't hide the last visible one
                 if (!meta.hidden && visibleCount <= 1) { chart.update(); return; }
                 meta.hidden = !meta.hidden;
+                ds.hidden = meta.hidden;
                 item.classList.toggle('hidden-dataset', meta.hidden);
                 if (meta.hidden) { hiddenTrendLabels.add(ds.label); } else { hiddenTrendLabels.delete(ds.label); }
             }
+            rescaleY(chart);
             chart.update();
         });
 
@@ -1436,20 +1519,201 @@ function renderTrendsLegend(chart) {
     // All / None buttons
     document.getElementById('legend-all-btn').onclick = () => {
         chart.data.datasets.forEach((ds, i) => {
+            ds.hidden = false;
             chart.getDatasetMeta(i).hidden = false;
             hiddenTrendLabels.delete(ds.label);
         });
         container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.remove('hidden-dataset'));
+        rescaleY(chart);
         chart.update();
     };
     document.getElementById('legend-none-btn').onclick = () => {
         chart.data.datasets.forEach((ds, i) => {
+            ds.hidden = true;
             chart.getDatasetMeta(i).hidden = true;
             hiddenTrendLabels.add(ds.label);
         });
         container.querySelectorAll('.trends-legend-item').forEach(el => el.classList.add('hidden-dataset'));
+        rescaleY(chart);
         chart.update();
     };
+}
+
+function openAddProductModal() {
+    document.getElementById('addProductModal').classList.remove('hidden');
+}
+function closeAddProductModal() {
+    document.getElementById('addProductModal').classList.add('hidden');
+}
+function dashFetchProductName() {
+    const urlInput = document.getElementById('dash-add-url');
+    const nameInput = document.getElementById('dash-add-name');
+    const btn = document.getElementById('dash-fetch-name-btn');
+    const url = (urlInput.value || '').trim();
+    if (!url) { showError('Enter a URL first'); return; }
+    btn.disabled = true;
+    btn.textContent = '...';
+    fetch('/api/product/fetch-info', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.name) { nameInput.value = data.name; }
+        else if (data.error) { showError('Could not fetch name: ' + data.error); }
+        else { showError('No product name found on page'); }
+    })
+    .catch(err => showError('Fetch failed: ' + err.message))
+    .finally(() => { btn.disabled = false; btn.textContent = '\u2193'; });
+}
+function dashAddProduct() {
+    const url = document.getElementById('dash-add-url').value.trim();
+    const name = document.getElementById('dash-add-name').value.trim();
+    const tagsRaw = document.getElementById('dash-add-tags').value || '';
+    const enabled = document.getElementById('dash-add-enabled').checked;
+    if (!url || !name) { showError('URL and Name are required'); return; }
+    const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    fetch('/api/product/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, url, selector: '', enabled, tags, alert_rules: ['below_avg'], notification_channels: ['discord'] })
+    })
+    .then(response => {
+        if (!response.ok) return response.json().then(err => { throw new Error(err.error || 'Request failed'); });
+        return response.json();
+    })
+    .then(result => {
+        if (result.error) { showError(result.error); }
+        else {
+            closeAddProductModal();
+            document.getElementById('dash-add-url').value = '';
+            document.getElementById('dash-add-name').value = '';
+            document.getElementById('dash-add-tags').value = '';
+            document.getElementById('dash-add-enabled').checked = true;
+            showSuccess('Product added');
+            refreshAll();
+        }
+    })
+    .catch(error => showError(error.message));
+}
+// Auto-fetch name on URL blur in dashboard add modal
+document.addEventListener('DOMContentLoaded', () => {
+    const urlInput = document.getElementById('dash-add-url');
+    if (urlInput) {
+        urlInput.addEventListener('blur', () => {
+            const nameInput = document.getElementById('dash-add-name');
+            if (urlInput.value.trim() && !nameInput.value.trim()) {
+                dashFetchProductName();
+            }
+        });
+    }
+});
+
+async function markPurchased(url, name, currentPrice, currency) {
+    const priceStr = currentPrice != null ? `$${Number(currentPrice).toFixed(2)} ${currency}` : 'unknown';
+    const overlay = document.createElement('div');
+    overlay.className = 'sm-confirm-overlay';
+    overlay.innerHTML = `
+        <div class="sm-confirm-box" style="max-width:400px">
+            <div class="sm-confirm-title">Mark as Purchased</div>
+            <div class="sm-confirm-msg" style="text-align:left">
+                <p style="margin-bottom:0.75rem"><strong>${escapeHtml(name)}</strong></p>
+                <label style="display:block;margin-bottom:0.25rem;color:#9ca3af;font-size:0.875rem">Purchase price (${escapeHtml(currency)})</label>
+                <input type="text" inputmode="decimal" id="purchase-price-input"
+                    value="${currentPrice != null ? Number(currentPrice).toFixed(2) : ''}"
+                    style="width:100%;padding:0.5rem;background:#374151;border:1px solid #4b5563;border-radius:0.375rem;color:#fff;font-size:1rem;margin-bottom:0.5rem"
+                    placeholder="Enter price paid">
+                <p style="color:#6b7280;font-size:0.75rem">Pre-filled with current price: ${priceStr}</p>
+                <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;color:#d1d5db;font-size:0.875rem;cursor:pointer">
+                    <input type="checkbox" id="purchase-remove-checkbox"
+                        style="width:1rem;height:1rem;accent-color:#059669;cursor:pointer">
+                    Remove from monitoring list
+                </label>
+            </div>
+            <div class="sm-confirm-actions">
+                <button class="sm-confirm-cancel" data-action="cancel">Cancel</button>
+                <button class="sm-confirm-ok" data-action="ok" style="background:#059669;border-color:#059669">Record Purchase</button>
+            </div>
+        </div>`;
+
+    const result = await new Promise(resolve => {
+        function close(val) {
+            overlay.style.opacity = '0';
+            setTimeout(() => { overlay.remove(); resolve(val); }, 150);
+        }
+        overlay.querySelector('[data-action="cancel"]').onclick = () => close(null);
+        overlay.querySelector('[data-action="ok"]').onclick = () => {
+            const input = document.getElementById('purchase-price-input');
+            const val = parseFloat(input.value);
+            if (isNaN(val) || val < 0) { input.style.borderColor = '#dc2626'; return; }
+            const removeAfter = document.getElementById('purchase-remove-checkbox').checked;
+            close({ price: val, remove: removeAfter });
+        };
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { document.removeEventListener('keydown', esc); close(null); }
+        });
+        document.body.appendChild(overlay);
+        setTimeout(() => document.getElementById('purchase-price-input').select(), 50);
+    });
+
+    if (result === null) return;
+
+    try {
+        const payload = { url, purchase_price: result.price };
+        console.log('Purchase payload:', payload);
+        const resp = await fetch('/api/product/purchase', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        console.log('Purchase response status:', resp.status);
+        const text = await resp.text();
+        console.log('Purchase response body:', text);
+        let data;
+        try { data = JSON.parse(text); } catch (e) {
+            showError('Server error: ' + text.substring(0, 200));
+            return;
+        }
+        if (data.error) {
+            showError(data.error);
+        } else {
+            const savingsMsg = data.savings_base != null && data.savings_base > 0
+                ? ` — saved $${data.savings_base.toFixed(2)} ${data.base_currency}`
+                : '';
+            showSuccess(`Purchased "${name}"${savingsMsg}`);
+            loadSavingsTally();
+
+            if (result.remove) {
+                await fetch('/api/product/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: url})
+                });
+                loadGroups().then(() => { loadProducts(); loadTrends(); });
+            }
+        }
+    } catch (err) {
+        console.error('Purchase error:', err);
+        showError('Failed to record purchase: ' + err.message);
+    }
+}
+
+function loadSavingsTally() {
+    fetch('/api/purchases')
+        .then(r => r.json())
+        .then(data => {
+            if (data.purchase_count > 0) {
+                const el = document.getElementById('hw-savings');
+                const sep = document.getElementById('hw-savings-sep');
+                const wrap = document.getElementById('hw-savings-wrap');
+                if (el) el.textContent = `$${data.total_savings.toFixed(2)} ${data.base_currency} (${data.purchase_count})`;
+                if (sep) sep.style.display = '';
+                if (wrap) wrap.style.display = '';
+            }
+        })
+        .catch(() => {});
 }
 
 async function deleteProduct(url, name) {
@@ -1472,13 +1736,33 @@ async function deleteProduct(url, name) {
             showError(result.error);
         } else {
             showSuccess(`Deleted "${name}"`);
-            loadProducts();
-            loadTrends();
+            loadGroups().then(() => { loadProducts(); loadTrends(); });
         }
     })
     .catch(error => {
         showError(error.message);
     });
+}
+
+async function deleteGroup(groupKey, groupName) {
+    const group = findGroupByKey(groupKey);
+    if (!group || !group.items || group.items.length === 0) return;
+    const count = group.items.length;
+    const ok = await smConfirm(`Delete all ${count} products in "${groupName}"?\n\nThis will permanently remove every product in this group and their history.`, { title: 'Delete Group', okText: 'Delete All' });
+    if (!ok) return;
+    try {
+        await Promise.all(group.items.map(it =>
+            fetchWithTimeout('/api/product/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url: it.url})
+            })
+        ));
+        showSuccess(`Deleted ${count} products from "${groupName}"`);
+        loadGroups().then(() => { loadProducts(); loadTrends(); });
+    } catch (err) {
+        showError('Failed to delete group: ' + err.message);
+    }
 }
 
 function checkPrice(url, btn) {
@@ -1755,8 +2039,14 @@ function renderGroupParentRow(group) {
         : `<span class="text-primary-300 font-medium">${escapeHtml(String(groupName))}</span>`;
     const escapedKey = escapeHtml(group.group_key).replace(/'/g, "\\'");
     const googleQuery = encodeURIComponent(groupName);
+    const bestItem = m.lowest || (group.items && group.items[0]) || {};
+    const buyName = (bestItem.name || groupName).replace(/'/g, "\\'");
+    const buyPrice = bestItem.current_price || bestItem._pb || 'null';
+    const buyCurrency = bestItem.currency || 'CAD';
+    const buyUrl = bestItem.url || '';
+    const escapedGroupName = escapeHtml(String(groupName)).replace(/'/g, "\\'");
     return `
-        <tr data-product-name="${escapeHtml(String(groupName)).toLowerCase()}" 
+        <tr data-product-name="${escapeHtml(String(groupName)).toLowerCase()}"
             data-status="enabled" data-alert="normal" data-price="${m.lowest ? m.lowest._pb : 0}" data-merchant="group" class="hover:bg-gray-700">
             <td class="px-6 py-4 whitespace-normal break-words align-top min-w-[160px]">${toggleBtn}${nameLink}</td>
             <td class="px-6 py-4 whitespace-normal break-all align-top"><span class="text-gray-400">Competitive Group</span></td>
@@ -1766,7 +2056,9 @@ function renderGroupParentRow(group) {
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-2 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-primary-500" onclick="checkGroupPrices(this, '${escapedKey}')">🔄 Check All</button>
-                    <a href="https://www.google.com/search?tbm=shop&q=${googleQuery}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium rounded-r-md text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
+                    <a href="https://www.google.com/search?tbm=shop&q=${googleQuery}" target="_blank" rel="noopener" class="inline-flex items-center px-3 py-2 border border-gray-600 border-l-0 text-sm font-medium text-gray-300 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-gray-500">🔍 Find</a>
+                    <button class="inline-flex items-center px-3 py-2 border border-green-600 border-l-0 text-sm font-medium text-green-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-green-500" onclick="markPurchased('${buyUrl}', '${buyName}', ${buyPrice}, '${buyCurrency}')">💰 Buy</button>
+                    <button class="inline-flex items-center px-3 py-2 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700 focus:z-10 focus:outline-none focus:ring-1 focus:ring-red-500" onclick="deleteGroup('${escapedKey}', '${escapedGroupName}')">🗑️ Delete</button>
                 </div>
             </td>
         </tr>
@@ -1813,6 +2105,7 @@ function renderGroupChildRow(it, idx, arr) {
             <td class="px-4 py-2 text-right">
                 <div class="inline-flex rounded-md shadow-sm" role="group">
                     <button class="inline-flex items-center px-3 py-1 border border-primary-600 text-sm font-medium rounded-l-md text-primary-400 bg-gray-900 hover:bg-gray-700" onclick="checkPrice('${it.url}', this)">🔄 Check</button>
+                    <button class="inline-flex items-center px-3 py-1 border border-green-600 border-l-0 text-sm font-medium text-green-400 bg-gray-900 hover:bg-gray-700" onclick="markPurchased('${it.url}', '${(it.name || 'Product').replace(/'/g, "\\'")}', ${it.current_price || 'null'}, '${it.currency || 'CAD'}')">💰 Buy</button>
                     <button class="inline-flex items-center px-3 py-1 border border-red-600 border-l-0 text-sm font-medium rounded-r-md text-red-400 bg-gray-900 hover:bg-gray-700" onclick="deleteProduct('${it.url}', '${(it.name || 'Product').replace(/'/g, "\\'")}')">🗑️ Delete</button>
                 </div>
             </td>
@@ -1897,6 +2190,7 @@ function doFullRefresh() {
         loadTrends();
         loadProducts();
         loadHealthWidget();
+        loadSavingsTally();
     }).catch(err => console.error('Refresh error:', err));
 }
 

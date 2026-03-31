@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Savings — Sale Monitor{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <h1 class="text-2xl font-bold text-white mb-6">Purchase Savings</h1>
+
+    <!-- Summary card -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+        <div class="flex flex-wrap gap-8 items-baseline">
+            <div>
+                <span class="text-gray-400 text-sm">Total Savings</span>
+                <div class="text-3xl font-bold text-green-400" id="total-savings">--</div>
+            </div>
+            <div>
+                <span class="text-gray-400 text-sm">Purchases</span>
+                <div class="text-3xl font-bold text-white" id="purchase-count">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase history table -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-700">
+            <thead class="bg-gray-900">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Product</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Date</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Paid</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Max Seen</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Savings</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider"></th>
+                </tr>
+            </thead>
+            <tbody id="purchases-body" class="divide-y divide-gray-700">
+                <tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function loadPurchases() {
+    fetch('/api/purchases')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-savings').textContent =
+                `$${data.total_savings.toFixed(2)} ${data.base_currency}`;
+            document.getElementById('purchase-count').textContent = data.purchase_count;
+
+            const tbody = document.getElementById('purchases-body');
+            if (!data.purchases || data.purchases.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">No purchases recorded yet. Use the "Purchased" button on the dashboard to track savings.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.purchases.map(p => {
+                const date = new Date(p.purchased_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                const paid = `$${Number(p.purchase_price).toFixed(2)} ${p.currency}`;
+                const ref = p.reference_price != null ? `$${Number(p.reference_price).toFixed(2)} ${p.currency}` : '—';
+                const savings = p.savings_base != null && p.savings_base > 0
+                    ? `<span class="text-green-400">$${Number(p.savings_base).toFixed(2)} ${data.base_currency}</span>`
+                    : '<span class="text-gray-500">—</span>';
+                return `<tr>
+                    <td class="px-6 py-4 text-sm text-white">${escapeHtml(p.product_name)}</td>
+                    <td class="px-6 py-4 text-sm text-gray-300">${date}</td>
+                    <td class="px-6 py-4 text-sm text-white text-right">${paid}</td>
+                    <td class="px-6 py-4 text-sm text-gray-400 text-right">${ref}</td>
+                    <td class="px-6 py-4 text-sm text-right">${savings}</td>
+                    <td class="px-6 py-4 text-sm text-right">
+                        <button class="text-red-400 hover:text-red-300 text-xs" onclick="deletePurchase(${p.id}, '${escapeHtml(p.product_name).replace(/'/g, "\\'")}')">Delete</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        })
+        .catch(err => {
+            document.getElementById('purchases-body').innerHTML =
+                `<tr><td colspan="6" class="px-6 py-8 text-center text-red-400">Failed to load: ${err.message}</td></tr>`;
+        });
+}
+
+async function deletePurchase(id, name) {
+    const ok = await smConfirm(`Delete purchase record for "${name}"?`, { title: 'Delete Purchase', okText: 'Delete' });
+    if (!ok) return;
+    try {
+        const resp = await fetch('/api/purchase/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id })
+        });
+        const data = await resp.json();
+        if (data.error) { showError(data.error); return; }
+        showSuccess('Purchase record deleted');
+        loadPurchases();
+    } catch (err) {
+        showError('Failed to delete: ' + err.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadPurchases);
+</script>
+{% endblock %}

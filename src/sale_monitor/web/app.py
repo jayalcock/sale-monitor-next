@@ -10,6 +10,7 @@ import sqlite3
 import time
 import requests
 import logging
+import threading
 from urllib.parse import urlparse
 
 from sale_monitor.storage.csv_products import export_products_csv
@@ -143,6 +144,9 @@ def create_app():
     _shared_ex_service = ExchangeRateService(cache_handler=_shared_history)
     flask_app.config['_HISTORY'] = _shared_history
     flask_app.config['_EX_SERVICE'] = _shared_ex_service
+
+    from sale_monitor.storage.purchase_store import PurchaseStore
+    flask_app.config['_PURCHASE_STORE'] = PurchaseStore(flask_app.config['HISTORY_DB'])
     
     # --------------- Rate Limiting ---------------
     try:
@@ -790,7 +794,18 @@ def create_app():
             product_store = flask_app.config['PRODUCT_STORE']
             if not product_store.delete(url):
                 return jsonify({'error': 'Product not found'}), 404
-            
+
+            # Remove from state.json and invalidate alerts cache
+            try:
+                state = load_state(flask_app.config['STATE_FILE'])
+                if url in state:
+                    del state[url]
+                    save_state(flask_app.config['STATE_FILE'], state)
+                _alerts_cache['mtime'] = 0.0
+                _alerts_cache['data'] = []
+            except Exception:
+                pass
+
             return jsonify({'success': True})
         except (OSError, ValueError) as e:
             return _safe_error(e)
@@ -837,6 +852,74 @@ def create_app():
             logging.error("Bulk auto-detect error: %s", e)
             return _safe_error(e)
     
+    @flask_app.route('/api/product/fetch-info', methods=['POST'])
+    @require_api_key
+    @_rate_limit("10 per minute")
+    def api_fetch_product_info():
+        """Fetch product name from a URL by inspecting JSON-LD, og:title, or <title>."""
+        import re as _re
+        try:
+            data = request.get_json()
+            url = (data or {}).get('url', '').strip()
+            if not url:
+                return jsonify({'error': 'url is required'}), 400
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return jsonify({'error': 'URL must use http or https'}), 400
+
+            resp = requests.get(url, headers={
+                'User-Agent': flask_app.config['USER_AGENT'],
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }, timeout=flask_app.config['TIMEOUT'])
+            if resp.status_code >= 400:
+                return jsonify({'error': f'HTTP {resp.status_code}'}), 502
+            html = resp.text
+
+            name = None
+            # 1) JSON-LD Product name
+            import json as _json
+            for m in _re.finditer(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, _re.DOTALL):
+                try:
+                    ld = _json.loads(m.group(1))
+                    items = ld if isinstance(ld, list) else [ld]
+                    for item in items:
+                        if isinstance(item, dict):
+                            if item.get('@type') in ('Product', 'IndividualProduct') and item.get('name'):
+                                name = item['name'].strip()
+                                break
+                            # Check @graph
+                            for node in item.get('@graph', []):
+                                if isinstance(node, dict) and node.get('@type') in ('Product', 'IndividualProduct') and node.get('name'):
+                                    name = node['name'].strip()
+                                    break
+                        if name:
+                            break
+                except (_json.JSONDecodeError, ValueError, TypeError):
+                    continue
+                if name:
+                    break
+
+            # 2) og:title
+            if not name:
+                m = _re.search(r'<meta[^>]+property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']', html)
+                if m:
+                    name = m.group(1).strip()
+
+            # 3) <title> tag
+            if not name:
+                m = _re.search(r'<title[^>]*>([^<]+)</title>', html, _re.IGNORECASE)
+                if m:
+                    name = m.group(1).strip()
+                    # Strip common suffixes like " | Store Name" or " - Store Name"
+                    name = _re.split(r'\s*[\|–—\-]\s*(?=[^|–—\-]*$)', name)[0].strip()
+
+            return jsonify({'name': name or ''})
+        except requests.exceptions.RequestException as e:
+            return jsonify({'error': str(e)}), 502
+        except (OSError, ValueError) as e:
+            return _safe_error(e)
+
     @flask_app.route('/api/product/add', methods=['POST'])
     @require_api_key
     def api_add_product():
@@ -921,69 +1004,67 @@ def create_app():
             
             product_store.add(new_product)
             
-            # Auto-check price for newly added product
-            try:
-                extractor = PriceExtractor(
-                    user_agent=flask_app.config['USER_AGENT'],
-                    timeout=flask_app.config['TIMEOUT'],
-                    max_retries=flask_app.config['MAX_RETRIES']
-                )
-                price, selector_source, detected_currency = extractor.extract_price_with_currency(
-                    new_product.url, 
-                    new_product.selector, 
-                    default_currency=getattr(new_product, 'currency', 'CAD')
-                )
-                
-                if price is not None:
-                    # Determine currency
-                    prefer_detected = os.getenv('PREFER_DETECTED_CURRENCY', '1').strip().lower() not in ('0','false','no')
-                    currency_source = 'default'
-                    if prefer_detected and detected_currency:
-                        currency = detected_currency
-                        currency_source = 'detected'
-                    elif getattr(new_product, 'currency', None):
-                        currency = new_product.currency
-                        currency_source = 'configured'
-                    else:
-                        currency = detected_currency or 'CAD'
-                        currency_source = 'detected' if detected_currency else 'default'
-                    
-                    # Convert to base currency if needed
-                    base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
-                    price_in_base = None
-                    if currency == base_currency:
-                        price_in_base = price
-                    else:
-                        ex_service = flask_app.config['_EX_SERVICE']
-                        converted = ex_service.convert(float(price), currency, base_currency)
-                        price_in_base = converted if converted is not None else None
-                    
-                    # Update state
-                    state = load_state(flask_app.config['STATE_FILE'])
-                    state[new_product.url] = {
-                        'name': new_product.name,
-                        'url': new_product.url,
-                        'current_price': price,
-                        'last_checked': datetime.now(timezone.utc).isoformat(),
-                        'last_price': price,
-                        'selector': new_product.selector,
-                        'selector_source': selector_source,
-                        'currency': currency,
-                        'currency_source': currency_source,
-                        'price_in_base': price_in_base
-                    }
-                    save_state(flask_app.config['STATE_FILE'], state)
-                    
-                    # Record in history
-                    flask_app.config['_HISTORY'].record_price(new_product.url, new_product.name, price, status='success', currency=currency, price_cad=price_in_base)
-                    
-                    logging.info(f"Auto-checked new product '{new_product.name}': ${price} {currency}")
-                else:
-                    logging.warning(f"Failed to auto-check price for new product '{new_product.name}'")
-            except Exception as e:
-                # Don't fail the whole request if price check fails
-                logging.error(f"Error auto-checking price for new product '{new_product.name}': {e}")
-            
+            # Auto-check price in background so the response returns immediately
+            def _bg_price_check(app, product):
+                with app.app_context():
+                    try:
+                        extractor = PriceExtractor(
+                            user_agent=app.config['USER_AGENT'],
+                            timeout=app.config['TIMEOUT'],
+                            max_retries=app.config['MAX_RETRIES']
+                        )
+                        price, selector_source, detected_currency = extractor.extract_price_with_currency(
+                            product.url,
+                            product.selector,
+                            default_currency=getattr(product, 'currency', 'CAD')
+                        )
+
+                        if price is not None:
+                            prefer_detected = os.getenv('PREFER_DETECTED_CURRENCY', '1').strip().lower() not in ('0','false','no')
+                            currency_source = 'default'
+                            if prefer_detected and detected_currency:
+                                currency = detected_currency
+                                currency_source = 'detected'
+                            elif getattr(product, 'currency', None):
+                                currency = product.currency
+                                currency_source = 'configured'
+                            else:
+                                currency = detected_currency or 'CAD'
+                                currency_source = 'detected' if detected_currency else 'default'
+
+                            base_currency = get_base_currency(app.config['CONFIG_FILE'])
+                            price_in_base = None
+                            if currency == base_currency:
+                                price_in_base = price
+                            else:
+                                ex_service = app.config['_EX_SERVICE']
+                                converted = ex_service.convert(float(price), currency, base_currency)
+                                price_in_base = converted if converted is not None else None
+
+                            state = load_state(app.config['STATE_FILE'])
+                            state[product.url] = {
+                                'name': product.name,
+                                'url': product.url,
+                                'current_price': price,
+                                'last_checked': datetime.now(timezone.utc).isoformat(),
+                                'last_price': price,
+                                'selector': product.selector,
+                                'selector_source': selector_source,
+                                'currency': currency,
+                                'currency_source': currency_source,
+                                'price_in_base': price_in_base
+                            }
+                            save_state(app.config['STATE_FILE'], state)
+
+                            app.config['_HISTORY'].record_price(product.url, product.name, price, status='success', currency=currency, price_cad=price_in_base)
+                            logging.info(f"Auto-checked new product '{product.name}': ${price} {currency}")
+                        else:
+                            logging.warning(f"Failed to auto-check price for new product '{product.name}'")
+                    except Exception as e:
+                        logging.error(f"Error auto-checking price for new product '{product.name}': {e}")
+
+            threading.Thread(target=_bg_price_check, args=(flask_app._get_current_object(), new_product), daemon=True).start()
+
             return jsonify({'success': True, 'product': {
                 'name': new_product.name,
                 'url': new_product.url,
@@ -2253,6 +2334,118 @@ def create_app():
         except Exception as e:
             logging.error("Error serving image for %s: %s", product_url, e, exc_info=True)
             return jsonify({'error': 'image processing failed'}), 404
+
+    # ---------------- Purchase / Savings endpoints -----------------
+
+    @flask_app.route('/api/product/purchase', methods=['POST'])
+    @require_api_key
+    def api_record_purchase():
+        """Record a product purchase and calculate savings."""
+        try:
+            data = request.get_json()
+            url = (data or {}).get('url', '').strip()
+            purchase_price = data.get('purchase_price')
+            notes = data.get('notes', '')
+
+            if not url or purchase_price is None:
+                return jsonify({'error': 'url and purchase_price are required'}), 400
+
+            purchase_price = float(purchase_price)
+            product_store = flask_app.config['PRODUCT_STORE']
+            product = product_store.get_by_url(url)
+            if not product:
+                return jsonify({'error': 'Product not found'}), 404
+
+            currency = product.currency or 'CAD'
+            base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
+            history = flask_app.config['_HISTORY']
+            ex_service = flask_app.config['_EX_SERVICE']
+
+            # Reference price: max price ever seen (in base currency)
+            stats = history.get_stats(url)
+            max_price_native = stats.get('max_price') if stats else None
+
+            # Convert purchase price to base currency
+            if currency == base_currency:
+                purchase_price_base = purchase_price
+            else:
+                converted = ex_service.convert(purchase_price, currency, base_currency)
+                purchase_price_base = round(converted, 2) if converted is not None else None
+
+            # Get max price in base currency from price_history
+            reference_price_base = None
+            if max_price_native is not None:
+                if currency == base_currency:
+                    reference_price_base = max_price_native
+                else:
+                    # Use max of price_cad column for accuracy
+                    with sqlite3.connect(flask_app.config['HISTORY_DB']) as conn:
+                        row = conn.execute(
+                            "SELECT MAX(price_cad) FROM price_history "
+                            "WHERE product_url = ? AND check_status = 'success' AND price_cad IS NOT NULL",
+                            (url,)
+                        ).fetchone()
+                        reference_price_base = row[0] if row and row[0] else None
+
+            purchase_store = flask_app.config['_PURCHASE_STORE']
+            result = purchase_store.record_purchase(
+                product_url=url,
+                product_name=product.name,
+                purchase_price=purchase_price,
+                currency=currency,
+                purchase_price_base=purchase_price_base,
+                reference_price=max_price_native,
+                reference_price_base=reference_price_base,
+                notes=notes,
+            )
+
+            return jsonify({
+                'success': True,
+                'purchase_id': result['id'],
+                'savings_base': result['savings_base'],
+                'base_currency': base_currency,
+                'reference_price': max_price_native,
+            })
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': str(e)}), 400
+        except (OSError, sqlite3.Error) as e:
+            return _safe_error(e)
+
+    @flask_app.route('/api/purchases')
+    @require_api_key_for_reads
+    def api_get_purchases():
+        """Get purchase history, optionally filtered by product URL."""
+        url = request.args.get('url', '').strip() or None
+        purchase_store = flask_app.config['_PURCHASE_STORE']
+        purchases = purchase_store.get_purchases(product_url=url)
+        summary = purchase_store.get_total_savings()
+        base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
+        return jsonify({
+            'purchases': purchases,
+            'total_savings': summary['total_savings'],
+            'purchase_count': summary['purchase_count'],
+            'base_currency': base_currency,
+        })
+
+    @flask_app.route('/api/purchase/delete', methods=['POST'])
+    @require_api_key
+    def api_delete_purchase():
+        """Delete a purchase record."""
+        try:
+            data = request.get_json()
+            purchase_id = (data or {}).get('id')
+            if not purchase_id:
+                return jsonify({'error': 'id is required'}), 400
+            purchase_store = flask_app.config['_PURCHASE_STORE']
+            if purchase_store.delete_purchase(int(purchase_id)):
+                return jsonify({'success': True})
+            return jsonify({'error': 'Purchase not found'}), 404
+        except (OSError, sqlite3.Error) as e:
+            return _safe_error(e)
+
+    @flask_app.route('/savings')
+    def savings_page():
+        return render_template('savings.html')
 
     # ---------------- Periodic image warmup -----------------
     def _warmup_images_once():
