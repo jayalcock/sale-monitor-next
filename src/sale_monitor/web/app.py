@@ -1063,7 +1063,7 @@ def create_app():
                     except Exception as e:
                         logging.error(f"Error auto-checking price for new product '{product.name}': {e}")
 
-            threading.Thread(target=_bg_price_check, args=(flask_app._get_current_object(), new_product), daemon=True).start()
+            threading.Thread(target=_bg_price_check, args=(flask_app, new_product), daemon=True).start()
 
             return jsonify({'success': True, 'product': {
                 'name': new_product.name,
