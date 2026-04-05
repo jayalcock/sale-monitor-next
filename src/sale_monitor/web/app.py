@@ -2191,17 +2191,18 @@ def create_app():
         if not _is_public_url(url):
             return None
         try:
-            # Use enhanced headers for Amazon
-            headers = {'User-Agent': flask_app.config['USER_AGENT']}
-            if 'amazon.' in url.lower():
-                headers.update({
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                })
+            headers = {
+                'User-Agent': flask_app.config['USER_AGENT'],
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+            }
             
             resp = requests.get(url, headers=headers, timeout=flask_app.config['TIMEOUT'])
             if resp.status_code >= 400:
@@ -2242,7 +2243,19 @@ def create_app():
         try:
             if not _is_public_url(image_url):
                 return None
-            r = requests.get(image_url, headers={'User-Agent': flask_app.config['USER_AGENT']}, timeout=flask_app.config['TIMEOUT'], stream=True)
+            img_headers = {
+                'User-Agent': flask_app.config['USER_AGENT'],
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'cross-site',
+            }
+            r = requests.get(image_url, headers=img_headers, timeout=flask_app.config['TIMEOUT'], stream=True)
+            if r.status_code >= 400:
+                # Retry without User-Agent — some CDNs block bot-like UAs for images
+                img_headers.pop('User-Agent', None)
+                r = requests.get(image_url, headers=img_headers, timeout=flask_app.config['TIMEOUT'], stream=True)
             if r.status_code >= 400:
                 return None
             content_type = r.headers.get('Content-Type', '').lower()
