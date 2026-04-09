@@ -1099,6 +1099,8 @@ function renderProducts() {
             // Lazy-load images after cards are rendered
             setTimeout(() => loadCardImages(), 100);
         }
+        // Re-render sparklines for newly created canvases
+        renderSparklines();
     }
 }
 
@@ -1760,12 +1762,19 @@ async function markPurchased(url, name, currentPrice, currency) {
             loadSavingsTally();
 
             if (result.remove) {
-                await fetch('/api/product/delete', {
+                const delResp = await fetch('/api/product/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({url: url})
                 });
-                loadGroups().then(() => { loadProducts(); loadTrends(); });
+                if (!delResp.ok) {
+                    const delText = await delResp.text();
+                    showError('Failed to remove item: ' + delText.substring(0, 200));
+                } else {
+                    await loadGroups();
+                    loadProducts();
+                    loadTrends();
+                }
             }
         }
     } catch (err) {
