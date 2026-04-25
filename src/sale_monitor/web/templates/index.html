@@ -50,7 +50,7 @@
             <span class="text-gray-500 hidden sm:inline">|</span>
             <span class="text-gray-400">Alerts: <a href="/alerts" id="hw-alerts" class="text-primary-400 hover:text-primary-300 font-medium">--</a></span>
             <span class="text-gray-500 hidden sm:inline">|</span>
-            <span class="text-gray-400">Rates: <span id="hw-rates" class="text-white font-medium">--</span></span>
+            <span class="text-gray-400">Rates: <span id="hw-rates" class="text-white font-medium">--</span><button id="hw-rates-refresh" onclick="refreshRates()" class="ml-1 text-xs text-gray-500 hover:text-primary-400 hidden" title="Refresh exchange rates">&#x21bb;</button></span>
             <span class="text-gray-500 hidden sm:inline" id="hw-savings-sep" style="display:none">|</span>
             <span class="text-gray-400" id="hw-savings-wrap" style="display:none">Savings: <a href="/savings" id="hw-savings" class="text-green-400 hover:text-green-300 font-medium">--</a></span>
         </div>
@@ -1650,6 +1650,9 @@ function dashAddProduct() {
     const enabled = document.getElementById('dash-add-enabled').checked;
     if (!url || !name) { showError('URL and Name are required'); return; }
     const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    const addBtn = document.querySelector('#dashAddProductForm button[onclick="dashAddProduct()"]');
+    const origText = addBtn ? addBtn.innerHTML : '';
+    if (addBtn) { addBtn.innerHTML = 'Adding &amp; checking price...'; addBtn.disabled = true; }
     fetch('/api/product/add', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1667,11 +1670,15 @@ function dashAddProduct() {
             document.getElementById('dash-add-name').value = '';
             document.getElementById('dash-add-tags').value = '';
             document.getElementById('dash-add-enabled').checked = true;
-            showSuccess('Product added');
-            refreshAll();
+            const msg = result.price_check
+                ? `Product added — $${result.price_check.price.toFixed(2)} ${result.price_check.currency}`
+                : 'Product added (price check pending)';
+            showSuccess(msg);
+            doFullRefresh();
         }
     })
-    .catch(error => showError(error.message));
+    .catch(error => showError(error.message))
+    .finally(() => { if (addBtn) { addBtn.innerHTML = origText; addBtn.disabled = false; } });
 }
 // Auto-fetch name on URL blur in dashboard add modal
 document.addEventListener('DOMContentLoaded', () => {
@@ -2021,17 +2028,40 @@ function loadHealthWidget() {
                 al.textContent = cnt > 0 ? `${cnt} active` : 'none';
             }
             const rt = document.getElementById('hw-rates');
+            const rb = document.getElementById('hw-rates-refresh');
             if (rt) {
                 if (data.exchange_rate_cache_age_seconds != null) {
                     const mins = Math.round(data.exchange_rate_cache_age_seconds / 60);
                     rt.textContent = mins < 120 ? 'Fresh' : `Stale (${Math.round(mins / 60)}h old)`;
                     rt.className = mins < 120 ? 'text-white font-medium' : 'text-yellow-400 font-medium';
+                    if (rb) rb.classList.toggle('hidden', mins < 120);
                 } else {
                     rt.textContent = 'N/A';
+                    if (rb) rb.classList.add('hidden');
                 }
             }
         })
         .catch(() => {});
+}
+
+function refreshRates() {
+    const rt = document.getElementById('hw-rates');
+    const rb = document.getElementById('hw-rates-refresh');
+    if (rt) rt.textContent = 'Refreshing...';
+    if (rb) rb.disabled = true;
+    fetch('/api/rates/refresh', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                if (rt) { rt.textContent = 'Fresh'; rt.className = 'text-white font-medium'; }
+                if (rb) rb.classList.add('hidden');
+            } else {
+                if (rt) rt.textContent = 'Refresh failed';
+                showError(data.error || 'Failed to refresh rates');
+            }
+        })
+        .catch(err => { if (rt) rt.textContent = 'Refresh failed'; showError('Rate refresh failed: ' + err.message); })
+        .finally(() => { if (rb) rb.disabled = false; });
 }
 
 // Competitive groups rendering

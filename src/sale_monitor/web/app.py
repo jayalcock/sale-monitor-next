@@ -1003,74 +1003,75 @@ def create_app():
                 return jsonify({'error': 'Product with this URL already exists'}), 400
             
             product_store.add(new_product)
-            
-            # Auto-check price in background so the response returns immediately
-            def _bg_price_check(app, product):
-                with app.app_context():
-                    try:
-                        extractor = PriceExtractor(
-                            user_agent=app.config['USER_AGENT'],
-                            timeout=app.config['TIMEOUT'],
-                            max_retries=app.config['MAX_RETRIES']
-                        )
-                        price, selector_source, detected_currency = extractor.extract_price_with_currency(
-                            product.url,
-                            product.selector,
-                            default_currency=getattr(product, 'currency', 'CAD')
-                        )
 
-                        if price is not None:
-                            prefer_detected = os.getenv('PREFER_DETECTED_CURRENCY', '1').strip().lower() not in ('0','false','no')
-                            currency_source = 'default'
-                            if prefer_detected and detected_currency:
-                                currency = detected_currency
-                                currency_source = 'detected'
-                            elif getattr(product, 'currency', None):
-                                currency = product.currency
-                                currency_source = 'configured'
-                            else:
-                                currency = detected_currency or 'CAD'
-                                currency_source = 'detected' if detected_currency else 'default'
+            # Auto-check price synchronously so the UI shows it immediately
+            price_result = None
+            try:
+                extractor = PriceExtractor(
+                    user_agent=flask_app.config['USER_AGENT'],
+                    timeout=flask_app.config['TIMEOUT'],
+                    max_retries=flask_app.config['MAX_RETRIES']
+                )
+                price, selector_source, detected_currency = extractor.extract_price_with_currency(
+                    new_product.url,
+                    new_product.selector,
+                    default_currency=getattr(new_product, 'currency', 'CAD')
+                )
 
-                            base_currency = get_base_currency(app.config['CONFIG_FILE'])
-                            price_in_base = None
-                            if currency == base_currency:
-                                price_in_base = price
-                            else:
-                                ex_service = app.config['_EX_SERVICE']
-                                converted = ex_service.convert(float(price), currency, base_currency)
-                                price_in_base = converted if converted is not None else None
+                if price is not None:
+                    prefer_detected = os.getenv('PREFER_DETECTED_CURRENCY', '1').strip().lower() not in ('0','false','no')
+                    currency_source = 'default'
+                    if prefer_detected and detected_currency:
+                        currency = detected_currency
+                        currency_source = 'detected'
+                    elif getattr(new_product, 'currency', None):
+                        currency = new_product.currency
+                        currency_source = 'configured'
+                    else:
+                        currency = detected_currency or 'CAD'
+                        currency_source = 'detected' if detected_currency else 'default'
 
-                            state = load_state(app.config['STATE_FILE'])
-                            state[product.url] = {
-                                'name': product.name,
-                                'url': product.url,
-                                'current_price': price,
-                                'last_checked': datetime.now(timezone.utc).isoformat(),
-                                'last_price': price,
-                                'selector': product.selector,
-                                'selector_source': selector_source,
-                                'currency': currency,
-                                'currency_source': currency_source,
-                                'price_in_base': price_in_base
-                            }
-                            save_state(app.config['STATE_FILE'], state)
+                    base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
+                    price_in_base = None
+                    if currency == base_currency:
+                        price_in_base = price
+                    else:
+                        ex_service = flask_app.config['_EX_SERVICE']
+                        converted = ex_service.convert(float(price), currency, base_currency)
+                        price_in_base = converted if converted is not None else None
 
-                            app.config['_HISTORY'].record_price(product.url, product.name, price, status='success', currency=currency, price_cad=price_in_base)
-                            logging.info(f"Auto-checked new product '{product.name}': ${price} {currency}")
-                        else:
-                            logging.warning(f"Failed to auto-check price for new product '{product.name}'")
-                    except Exception as e:
-                        logging.error(f"Error auto-checking price for new product '{product.name}': {e}")
+                    state = load_state(flask_app.config['STATE_FILE'])
+                    state[new_product.url] = {
+                        'name': new_product.name,
+                        'url': new_product.url,
+                        'current_price': price,
+                        'last_checked': datetime.now(timezone.utc).isoformat(),
+                        'last_price': price,
+                        'selector': new_product.selector,
+                        'selector_source': selector_source,
+                        'currency': currency,
+                        'currency_source': currency_source,
+                        'price_in_base': price_in_base
+                    }
+                    save_state(flask_app.config['STATE_FILE'], state)
 
-            threading.Thread(target=_bg_price_check, args=(flask_app, new_product), daemon=True).start()
+                    flask_app.config['_HISTORY'].record_price(new_product.url, new_product.name, price, status='success', currency=currency, price_cad=price_in_base)
+                    logging.info(f"Auto-checked new product '{new_product.name}': ${price} {currency}")
+                    price_result = {'price': float(price), 'currency': currency}
+                else:
+                    logging.warning(f"Failed to auto-check price for new product '{new_product.name}'")
+            except Exception as e:
+                logging.error(f"Error auto-checking price for new product '{new_product.name}': {e}")
 
-            return jsonify({'success': True, 'product': {
+            resp = {'success': True, 'product': {
                 'name': new_product.name,
                 'url': new_product.url,
                 'enabled': new_product.enabled,
                 'notification_cooldown_hours': new_product.notification_cooldown_hours
-            }})
+            }}
+            if price_result:
+                resp['price_check'] = price_result
+            return jsonify(resp)
         except (OSError, ValueError) as e:
             return _safe_error(e)
     
@@ -1878,6 +1879,23 @@ def create_app():
             logger.error("Health check failed: %s", e, exc_info=True)
             return jsonify({'status': 'error', 'error': 'Health check failed'}), 500
 
+    @flask_app.route('/api/rates/refresh', methods=['POST'])
+    @require_api_key
+    def api_refresh_rates():
+        """Force-refresh exchange rates from the API."""
+        try:
+            ex_service = flask_app.config['_EX_SERVICE']
+            base_currency = get_base_currency(flask_app.config['CONFIG_FILE'])
+            ex_service.clear_cache()
+            rate = ex_service.get_rate('USD', base_currency)
+            if rate is not None:
+                return jsonify({'success': True, 'sample_rate': f'USD/{base_currency} = {rate}'})
+            else:
+                return jsonify({'error': 'Failed to fetch rates from API'}), 502
+        except Exception as e:
+            logger.error("Rate refresh failed: %s", e)
+            return jsonify({'error': str(e)}), 500
+
     # ---------------- Settings / Notification Config -----------------
 
     @flask_app.route('/settings')
@@ -2207,7 +2225,10 @@ def create_app():
             resp = requests.get(url, headers=headers, timeout=flask_app.config['TIMEOUT'])
             if resp.status_code >= 400:
                 return None
+            import html as _html_mod
             img = _extract_image_url(resp.text, url)
+            if img:
+                img = _html_mod.unescape(img)
             if img and not _is_public_url(img):
                 return None
             if img:
