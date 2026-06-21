@@ -181,6 +181,14 @@ class PriceExtractor:
                         self.last_identifiers = self._extract_identifiers_from_html(html_text)
                     except Exception:
                         self.last_identifiers = {}
+                    # ui.com lists the JSON-LD/displayPrice without mandatory
+                    # surcharges (eco/recycling fees), but the storefront — and
+                    # the customer — pays displayPriceWithSurcharges. Prefer that.
+                    if price is not None and host.endswith('ui.com'):
+                        adjusted = self._uicom_price_with_surcharges(html_text, price)
+                        if adjusted is not None and adjusted != price:
+                            price = adjusted
+                            source = 'uicom-surcharges'
                     if not detected_currency:
                         # Heuristic body scan if structured tags missing
                         body_l = html_text.lower()
@@ -207,6 +215,30 @@ class PriceExtractor:
             self.last_currency_source = 'default'
 
         return price, source, currency
+
+    def _uicom_price_with_surcharges(self, html: str, base_price: float) -> Optional[float]:
+        """Return ui.com's surcharge-inclusive price for the variant matching *base_price*.
+
+        ui.com embeds, per variant, ``displayPrice`` (used by JSON-LD, excludes
+        mandatory eco/recycling surcharges) and ``displayPriceWithSurcharges``
+        (what the storefront shows and the customer pays). We anchor on the
+        variant whose ``displayPrice`` equals the already-extracted base price
+        so accessories on the same page can't be picked by mistake.
+        """
+        if not html:
+            return None
+        try:
+            cents = int(round(float(base_price) * 100))
+        except (TypeError, ValueError):
+            return None
+        m = re.search(
+            r'"displayPrice":\{"amount":' + str(cents) +
+            r',[^}]*\},"displayPriceWithSurcharges":\{"amount":(\d+)',
+            html,
+        )
+        if not m:
+            return None
+        return int(m.group(1)) / 100
 
     def _detect_currency_from_html(self, html: str, url: str) -> Optional[str]:
         """Detect currency code (CAD, USD, etc.) from HTML content.
