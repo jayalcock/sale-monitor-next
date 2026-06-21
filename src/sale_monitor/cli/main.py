@@ -43,10 +43,20 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
     max_workers = min(4, len(enabled)) if enabled else 1
 
     def _extract(p):
-        result = extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
-        # Capture identifiers immediately — the shared extractor attribute gets
-        # overwritten by the next thread, so we snapshot it here.
-        identifiers = dict(getattr(extractor, 'last_identifiers', None) or {})
+        # Use a per-thread extractor instance. The extractor communicates the
+        # detected identifiers (and cached page HTML) via mutable instance
+        # attributes (last_identifiers, _last_response_html); sharing one
+        # instance across worker threads let those attributes be overwritten
+        # mid-flight, smearing one product's identifiers onto another and
+        # creating bogus competitive groups. A fresh instance per call isolates
+        # that state.
+        local_extractor = PriceExtractor(
+            user_agent=args.user_agent,
+            timeout=args.timeout,
+            max_retries=args.max_retries,
+        )
+        result = local_extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
+        identifiers = dict(getattr(local_extractor, 'last_identifiers', None) or {})
         return p, result, identifiers
 
     extraction_results = []
