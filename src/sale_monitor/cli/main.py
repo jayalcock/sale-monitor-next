@@ -13,11 +13,12 @@ from dotenv import load_dotenv
 
 from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.services.price_extractor import PriceExtractor
-from sale_monitor.storage.config_store import get_base_currency
+from sale_monitor.storage.config_store import get_base_currency, load_notification_config
 from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.storage.product_store import ProductStore
 from sale_monitor.services.notifications import NotificationManager, SmtpConfig
+from sale_monitor.services.webhooks import build_notifiers_from_config
 
 
 def _str_to_bool(v: str, default: bool = False) -> bool:
@@ -35,6 +36,19 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
     products = store.get_all()
     state = load_state(args.state_file)
     ex_service = ExchangeRateService(cache_handler=history)
+
+    # Resolve config + base currency once (was re-read per product inside the loop)
+    config_file = os.getenv('CONFIG_FILE', 'data/config.json')
+    base_currency = get_base_currency(config_file)
+
+    # Build webhook notifiers (Discord/Slack) once per run. Previously these were
+    # configured but never dispatched from the monitor loop — only email was sent.
+    notif_cfg = load_notification_config(config_file)
+    webhook_notifiers = build_notifiers_from_config(notif_cfg.get('webhooks', []))
+    if webhook_notifiers:
+        logging.info(
+            f"Webhook channels active: {', '.join(n.name for n in webhook_notifiers)}"
+        )
 
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products")
@@ -94,8 +108,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
         
         # Compute base-currency price so historical records reflect the
         # exchange rate at check time rather than being recomputed later.
-        config_file = os.getenv('CONFIG_FILE', 'data/config.json')
-        base_currency = get_base_currency(config_file)
+        # (config_file / base_currency resolved once above.)
         price_in_base = None
         if currency == base_currency:
             price_in_base = price
@@ -185,7 +198,7 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
                     pass
 
         # Cooldown and de-dup checks
-        if should_notify and smtp_cfg.enable:
+        if should_notify and (smtp_cfg.enable or webhook_notifiers):
             cooldown_hours = p.notification_cooldown_hours or args.default_cooldown_hours
             last_sent_str = rec.get("last_notification_sent")
             last_sent = None
@@ -230,23 +243,48 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
                 logging.info(f"{p.name}: notification suppressed (target cooldown, same price)")
                 pass
             else:
-                # Send email
-                try:
-                    notifier.send_sale_notification(
-                        product_name=p.name,
-                        product_url=p.url,
-                        current_price=price,
-                        old_price=old_price,
-                        target_price=p.target_price,
-                        triggered_by=triggered_by or "rule",
-                    )
+                # Dispatch to every configured channel: email (if enabled) and
+                # all enabled webhooks. State timestamps are updated if any
+                # channel succeeds, so the cooldown applies across channels.
+                sent_any = False
+                if smtp_cfg.enable:
+                    try:
+                        notifier.send_sale_notification(
+                            product_name=p.name,
+                            product_url=p.url,
+                            current_price=price,
+                            currency=currency,
+                            price_in_base=price_in_base,
+                            base_currency=base_currency,
+                            old_price=old_price,
+                            target_price=p.target_price,
+                            triggered_by=triggered_by or "rule",
+                        )
+                        sent_any = True
+                    except Exception as e:
+                        logging.error(f"{p.name}: email failed: {e}")
+                for wn in webhook_notifiers:
+                    try:
+                        ok = wn.send(
+                            product_name=p.name,
+                            product_url=p.url,
+                            current_price=price,
+                            currency=currency,
+                            price_in_base=price_in_base,
+                            base_currency=base_currency,
+                            old_price=old_price,
+                            target_price=p.target_price,
+                            triggered_by=triggered_by or "rule",
+                        )
+                        sent_any = sent_any or bool(ok)
+                    except Exception as e:
+                        logging.error(f"{p.name}: webhook {wn.name} failed: {e}")
+                if sent_any:
                     rec["last_notification_sent"] = datetime.now().isoformat()
                     rec["last_notification_price"] = price
                     if triggered_by == "target_price":
                         rec["last_target_notification"] = rec["last_notification_sent"]
                     logging.info(f"{p.name}: notification sent")
-                except Exception as e:
-                    logging.error(f"{p.name}: email failed: {e}")
 
         state[key] = rec
         updated += 1
