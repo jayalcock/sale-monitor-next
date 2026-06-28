@@ -48,3 +48,4 @@ build/
 
 # Deployment script output
 deploy.log
+.claude/
