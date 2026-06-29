@@ -214,33 +214,13 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
 
             last_notified_price = rec.get("last_notification_price")
 
-            # Extra suppression for target trigger: if we've already sent a target notification
-            # and we're still at/under target within cooldown, skip duplicate emails even if the
-            # exact price changed slightly.
-            last_target_sent_str = rec.get("last_target_notification")
-            last_target_sent = None
-            if last_target_sent_str:
-                try:
-                    last_target_sent = datetime.fromisoformat(last_target_sent_str)
-                except Exception:
-                    last_target_sent = None
-            target_in_cooldown = False
-            if last_target_sent:
-                target_in_cooldown = datetime.now() < (last_target_sent + timedelta(hours=cooldown_hours))
-
-            # Suppress only if within cooldown AND price hasn't changed
-            if in_cooldown and last_notified_price is not None and float(last_notified_price) == float(price):
-                # Within cooldown and same price as last notification -> skip
-                logging.info(f"{p.name}: notification suppressed (cooldown, same price)")
-                pass
-            elif (
-                triggered_by == "target_price"
-                and target_in_cooldown
-                and last_notified_price is not None
-                and float(last_notified_price) == float(price)
-            ):
-                # Within cooldown for target trigger and price unchanged -> skip
-                logging.info(f"{p.name}: notification suppressed (target cooldown, same price)")
+            # Better-price gate: within the cooldown window, only re-notify if the
+            # price has dropped BELOW the price we last notified at. This stops spam
+            # from small fluctuations (a price wobbling a dollar or two) and from
+            # persistent rules like below_avg that are true on every check. A genuine
+            # new low still alerts immediately, even inside the cooldown window.
+            if in_cooldown and last_notified_price is not None and float(price) >= float(last_notified_price):
+                logging.info(f"{p.name}: notification suppressed (cooldown, no new low)")
                 pass
             else:
                 # Dispatch to every configured channel: email (if enabled) and
