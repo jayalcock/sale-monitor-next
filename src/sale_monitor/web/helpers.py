@@ -38,7 +38,10 @@ class CachedProductStore:
         self._store = store
         self._db_path = store.db_path
         self._mtime: float = 0.0
-        self._last_check: float = 0.0
+        # -inf, not 0: time.monotonic() counts from boot, so on a recently
+        # booted machine (CI VMs!) `now - 0 < TTL` would wrongly skip the
+        # very first refresh.
+        self._last_check: float = float('-inf')
         self._products: list = []
 
     def _latest_mtime(self):
@@ -73,7 +76,7 @@ class CachedProductStore:
     def invalidate(self):
         """Force a refresh on next access (call after writes)."""
         self._mtime = 0.0
-        self._last_check = 0.0
+        self._last_check = float('-inf')
 
     # Write-through methods that invalidate the cache
     def add(self, *args, **kwargs):
