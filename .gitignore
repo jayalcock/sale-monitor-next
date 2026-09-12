@@ -24,6 +24,8 @@ data/
 data/state.json
 data/products.csv
 data/.last_warmup
+# config.json holds notification secrets (SMTP password, webhook URLs)
+data/config.json
 
 # SQLite databases and temporary files
 *.db
