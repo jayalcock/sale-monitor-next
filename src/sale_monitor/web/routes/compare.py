@@ -9,7 +9,12 @@ from flask import Blueprint, jsonify, request
 from sale_monitor.storage.config_store import get_base_currency
 from sale_monitor.storage.json_state import mutate_state
 from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
-from sale_monitor.web.comparison import build_comparison_groups, normalize_name, similar
+from sale_monitor.web.comparison import (
+    build_comparison_groups,
+    normalize_name,
+    numeric_tokens,
+    similar,
+)
 from sale_monitor.web.extensions import rate_limit
 from sale_monitor.web.helpers import (
     config_file,
@@ -114,7 +119,11 @@ def api_compare_suggest():
         for p in products:
             name_by_url[p.url] = p.name
             if p.url not in grouped_urls:
-                ungrouped.append({'url': p.url, 'name': p.name, 'norm': normalize_name(p.name)})
+                ungrouped.append({
+                    'url': p.url, 'name': p.name,
+                    'norm': normalize_name(p.name),
+                    'nums': numeric_tokens(p.name),
+                })
 
         suggestions = []
         threshold = float(os.getenv('COMPARE_NAME_SIMILARITY', '0.88'))
@@ -124,6 +133,10 @@ def api_compare_suggest():
         for i in range(len(ungrouped)):
             for j in range(i + 1, len(ungrouped)):
                 a, b = ungrouped[i], ungrouped[j]
+                # Different model/size/version numbers → different SKUs,
+                # regardless of how similar the names read.
+                if a['nums'] != b['nums']:
+                    continue
                 sim = similar(a['norm'], b['norm'])
                 if sim >= threshold:
                     suggestions.append({
@@ -142,6 +155,7 @@ def api_compare_suggest():
                     'url': first['url'],
                     'name': first.get('name', ''),
                     'norm': normalize_name(first.get('name', '')),
+                    'nums': numeric_tokens(first.get('name', '')),
                     'group_key': g['group_key'],
                 })
 
@@ -149,6 +163,8 @@ def api_compare_suggest():
             for rep in group_reps:
                 pair = tuple(sorted([item['url'], rep['url']]))
                 if pair in seen_pairs:
+                    continue
+                if item['nums'] != rep['nums']:
                     continue
                 sim = similar(item['norm'], rep['norm'])
                 if sim >= threshold:

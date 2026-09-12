@@ -69,10 +69,16 @@ class PriceCheckService:
     # ── pipeline ─────────────────────────────────────────────────────────
 
     def check(self, product: Product, record_history: bool = True) -> CheckResult:
-        """Extract price + currency for *product* and record it in history."""
+        """Extract price + currency for *product* and record it in history.
+
+        Fetches ``scrape_url`` when set (e.g. a JSON variant endpoint that is
+        easier to parse than the storefront page); ``url`` remains the
+        display/link URL and the history/state key.
+        """
         extractor = self._extractor_factory()
+        fetch_url = getattr(product, "scrape_url", None) or product.url
         extraction: ExtractionResult = extractor.extract(
-            product.url, product.selector,
+            fetch_url, product.selector,
             default_currency=getattr(product, "currency", None) or "CAD",
         )
 

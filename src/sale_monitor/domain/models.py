@@ -14,6 +14,7 @@ class Product:
     notification_cooldown_hours: int = 24
     current_price: Optional[float] = None
     selector_source: Optional[str] = None  # 'manual', 'auto', 'bookmarklet'
+    scrape_url: Optional[str] = None  # Fetch this URL instead of `url` (e.g. a JSON variant endpoint); `url` stays the display/link URL
     currency: str = "CAD"  # Currency for target_price and discount calculations
     group: Optional[str] = None  # Explicit competitive group slug
     tags: List[str] = field(default_factory=list)

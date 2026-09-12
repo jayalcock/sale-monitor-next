@@ -16,10 +16,12 @@ from dotenv import load_dotenv
 from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.services.price_check import PriceCheckService
 from sale_monitor.services.price_extractor import PriceExtractor
+from sale_monitor.storage.config_store import load_notification_config
 from sale_monitor.storage.json_state import load_state, mutate_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.storage.product_store import ProductStore
 from sale_monitor.services.notifications import NotificationManager, SmtpConfig
+from sale_monitor.services.webhooks import build_notifiers_from_config
 from sale_monitor.utils import env_bool, str_to_bool
 
 
@@ -108,6 +110,16 @@ def check_prices(args, smtp_cfg, notifier, service=None, history=None, store=Non
     # to other products aren't clobbered.
     state = load_state(args.state_file)
 
+    # Build webhook notifiers (Discord/Slack) once per run so the monitor
+    # loop dispatches to every enabled channel, not just email.
+    config_file = os.getenv('CONFIG_FILE', 'data/config.json')
+    notif_cfg = load_notification_config(config_file)
+    webhook_notifiers = build_notifiers_from_config(notif_cfg.get('webhooks', []))
+    if webhook_notifiers:
+        logging.info(
+            f"Webhook channels active: {', '.join(n.name for n in webhook_notifiers)}"
+        )
+
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products")
 
@@ -166,40 +178,61 @@ def check_prices(args, smtp_cfg, notifier, service=None, history=None, store=Non
 
         # Cooldown and de-dup checks
         extra_fields = {}
-        if triggered_by and smtp_cfg.enable:
+        if triggered_by and (smtp_cfg.enable or webhook_notifiers):
             now_dt = datetime.now(timezone.utc)
             cooldown_hours = p.notification_cooldown_hours or args.default_cooldown_hours
             in_cooldown = _cooldown_active(now_dt, rec.get("last_notification_sent"), cooldown_hours)
-            # Extra suppression for target trigger: if we've already sent a
-            # target notification and we're still at/under target within
-            # cooldown, skip duplicate emails even if the price barely moved.
-            target_in_cooldown = _cooldown_active(now_dt, rec.get("last_target_notification"), cooldown_hours)
-
             last_notified_price = rec.get("last_notification_price")
-            same_price = last_notified_price is not None and float(last_notified_price) == float(price)
 
-            if in_cooldown and same_price:
-                logging.info(f"{p.name}: notification suppressed (cooldown, same price)")
-            elif triggered_by == "target_price" and target_in_cooldown and same_price:
-                logging.info(f"{p.name}: notification suppressed (target cooldown, same price)")
+            # Better-price gate: within the cooldown window, only re-notify if
+            # the price has dropped BELOW the price we last notified at. This
+            # stops spam from small fluctuations and from persistent rules like
+            # below_avg that are true on every check. A genuine new low still
+            # alerts immediately, even inside the cooldown window.
+            if in_cooldown and last_notified_price is not None and float(price) >= float(last_notified_price):
+                logging.info(f"{p.name}: notification suppressed (cooldown, no new low)")
             else:
-                try:
-                    notifier.send_sale_notification(
-                        product_name=p.name,
-                        product_url=p.url,
-                        current_price=price,
-                        old_price=old_price,
-                        target_price=p.target_price,
-                        triggered_by=triggered_by or "rule",
-                    )
-                    sent_at = datetime.now(timezone.utc).isoformat()
-                    extra_fields["last_notification_sent"] = sent_at
+                # Dispatch to every configured channel: email (if enabled) and
+                # all enabled webhooks. State timestamps advance only if a
+                # channel succeeds, so a broken channel can't mark an alert
+                # delivered, and the cooldown applies across channels.
+                sent_any = False
+                if smtp_cfg.enable:
+                    try:
+                        notifier.send_sale_notification(
+                            product_name=p.name,
+                            product_url=p.url,
+                            current_price=price,
+                            currency=result.currency,
+                            price_in_base=result.price_in_base,
+                            base_currency=result.base_currency,
+                            old_price=old_price,
+                            target_price=p.target_price,
+                            triggered_by=triggered_by or "rule",
+                        )
+                        sent_any = True
+                    except Exception as e:
+                        logging.error(f"{p.name}: email failed: {e}")
+                for wn in webhook_notifiers:
+                    try:
+                        ok = wn.send(
+                            product_name=p.name,
+                            product_url=p.url,
+                            current_price=price,
+                            currency=result.currency,
+                            price_in_base=result.price_in_base,
+                            base_currency=result.base_currency,
+                            old_price=old_price,
+                            target_price=p.target_price,
+                            triggered_by=triggered_by or "rule",
+                        )
+                        sent_any = sent_any or bool(ok)
+                    except Exception as e:
+                        logging.error(f"{p.name}: webhook {wn.name} failed: {e}")
+                if sent_any:
+                    extra_fields["last_notification_sent"] = datetime.now(timezone.utc).isoformat()
                     extra_fields["last_notification_price"] = price
-                    if triggered_by == "target_price":
-                        extra_fields["last_target_notification"] = sent_at
                     logging.info(f"{p.name}: notification sent")
-                except Exception as e:
-                    logging.error(f"{p.name}: email failed: {e}")
 
         to_apply.append((result, extra_fields))
 

@@ -43,10 +43,15 @@ class ProductStore:
                     tags TEXT DEFAULT '',
                     alert_rules TEXT DEFAULT '',
                     notification_channels TEXT DEFAULT '',
+                    scrape_url TEXT,
                     created_at TEXT,
                     updated_at TEXT
                 )
             """)
+            # Legacy tables predate scrape_url — add it in place
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(products)").fetchall()}
+            if "scrape_url" not in cols:
+                conn.execute("ALTER TABLE products ADD COLUMN scrape_url TEXT")
             conn.commit()
 
     # ── Read ──────────────────────────────────────────────────────────────
@@ -66,6 +71,7 @@ class ProductStore:
             tags=_parse_list(row["tags"]),
             alert_rules=_parse_list(row["alert_rules"]),
             notification_channels=_parse_list(row["notification_channels"]),
+            scrape_url=row["scrape_url"] or None,
         )
 
     def get_all(self) -> List[Product]:
@@ -109,8 +115,8 @@ class ProductStore:
                    (name, url, target_price, discount_threshold, selector,
                     enabled, notification_cooldown_hours, selector_source,
                     currency, "group", tags, alert_rules, notification_channels,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    scrape_url, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     product.name,
                     product.url,
@@ -125,6 +131,7 @@ class ProductStore:
                     _join_list(product.tags),
                     _join_list(product.alert_rules),
                     _join_list(product.notification_channels),
+                    product.scrape_url or None,
                     now,
                     now,
                 ),
@@ -146,6 +153,8 @@ class ProductStore:
                 val = _join_list(val)
             if key == "enabled":
                 val = 1 if val else 0
+            if key == "scrape_url" and not val:
+                val = None  # empty string clears the override
             set_parts.append(f"{col} = ?")
             values.append(val)
         set_parts.append("updated_at = ?")
@@ -174,15 +183,16 @@ class ProductStore:
                        (name, url, target_price, discount_threshold, selector,
                         enabled, notification_cooldown_hours, selector_source,
                         currency, "group", tags, alert_rules, notification_channels,
-                        created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        scrape_url, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         p.name, p.url, p.target_price, p.discount_threshold,
                         p.selector, 1 if p.enabled else 0,
                         p.notification_cooldown_hours, p.selector_source,
                         p.currency or "CAD", p.group,
                         _join_list(p.tags), _join_list(p.alert_rules),
-                        _join_list(p.notification_channels), now, now,
+                        _join_list(p.notification_channels),
+                        p.scrape_url or None, now, now,
                     ),
                 )
             conn.commit()

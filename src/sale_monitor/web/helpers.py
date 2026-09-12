@@ -41,14 +41,29 @@ class CachedProductStore:
         self._last_check: float = 0.0
         self._products: list = []
 
+    def _latest_mtime(self):
+        """Newest mtime across the DB file and its WAL/SHM sidecars.
+
+        Under WAL mode, writes land in the -wal sidecar without touching the
+        main .db file, so watching the .db mtime alone misses writes made by
+        other processes until the next checkpoint.
+        """
+        latest = None
+        for path in (self._db_path, self._db_path + '-wal', self._db_path + '-shm'):
+            try:
+                mt = os.path.getmtime(path)
+            except OSError:
+                continue
+            latest = mt if latest is None else max(latest, mt)
+        return latest
+
     def get_all(self):
         now = time.monotonic()
         if now - self._last_check < self._TTL:
             return self._products
         self._last_check = now
-        try:
-            mt = os.path.getmtime(self._db_path)
-        except OSError:
+        mt = self._latest_mtime()
+        if mt is None:
             return self._products
         if mt != self._mtime:
             self._products = self._store.get_all()

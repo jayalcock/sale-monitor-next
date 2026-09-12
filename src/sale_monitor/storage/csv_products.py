@@ -7,7 +7,7 @@ from sale_monitor.domain.models import Product
 CSV_COLUMNS = [
     'name', 'url', 'target_price', 'discount_threshold', 'selector',
     'enabled', 'notification_cooldown_hours', 'selector_source', 'currency',
-    'group', 'tags', 'alert_rules', 'notification_channels',
+    'group', 'tags', 'alert_rules', 'notification_channels', 'scrape_url',
 ]
 
 
@@ -73,6 +73,7 @@ def read_products(csv_path: str) -> List[Product]:
                 tags=_parse_list(row.get("tags")),
                 alert_rules=_parse_list(row.get("alert_rules")),
                 notification_channels=_parse_list(row.get("notification_channels")),
+                scrape_url=(row.get("scrape_url") or "").strip() or None,
             )
             products.append(product)
     return products
@@ -100,4 +101,5 @@ def export_products_csv(filepath: str, products: List[Product]) -> None:
                 ','.join(getattr(p, 'tags', []) or []),
                 ','.join(getattr(p, 'alert_rules', []) or []),
                 ','.join(getattr(p, 'notification_channels', []) or []),
+                getattr(p, 'scrape_url', None) or '',
             ])

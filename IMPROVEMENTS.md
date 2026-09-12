@@ -19,8 +19,15 @@
 - Dashboard works with `API_KEY` set: key stored in browser localStorage (Settings page), attached as `X-API-Key` by a fetch wrapper in `base.html`
 - Migration 6: `price` column nullable; failed checks store NULL instead of 0
 - `requirements-dev.txt` split from runtime deps (Docker image no longer installs pytest/pylint); `mypy src` passes clean and stubs are installed
-- Dead auto-discovery env vars removed from `.env` (code lives in `archived/`); `data/products.csv` + `data/discovery_cache.json` untracked per `.gitignore` intent
+- Dead auto-discovery env vars removed from `.env` (the discovery modules under `services/` are an archival capture from the live server, not wired into the app); `data/products.csv` + `data/discovery_cache.json` untracked per `.gitignore` intent
 - GitHub Actions workflow runs pytest + mypy on Python 3.11 and 3.13
+
+## 17. Reconciled with live-deployment sync (2026-09)
+- Ported into the refactored pipeline: Discord/Slack webhook dispatch in the
+  check loop, the better-price cooldown gate, and the WAL-aware product cache
+- Implemented the features whose tests were captured from the live server but
+  whose code never was: `scrape_url` fetch override (model, store migration,
+  CSV, checker) and the numeric-token gate for compare suggestions
 
 ## 1. Concurrency & File Locking  ✅ Resolved
 - ~~`state.json` uses a basic spinlock (0.1s polling)~~

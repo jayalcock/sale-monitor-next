@@ -8,7 +8,7 @@ cache notices touches to the WAL sidecar.
 import os
 import time
 
-from sale_monitor.web.app import _CachedProductStore
+from sale_monitor.web.helpers import CachedProductStore as _CachedProductStore
 
 
 class _FakeStore:

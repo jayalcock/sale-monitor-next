@@ -24,3 +24,9 @@ mypy = "^0.910"
 [[tool.mypy.overrides]]
 module = "schedule"
 ignore_missing_imports = true
+
+# Archival capture from the live deployment (not imported by the app);
+# kept as-is rather than maintained to mypy standards.
+[[tool.mypy.overrides]]
+module = "sale_monitor.services.product_discovery"
+ignore_errors = true

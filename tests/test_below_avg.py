@@ -11,7 +11,13 @@ from unittest.mock import patch
 import pytest
 
 from sale_monitor.cli.main import main
+from sale_monitor.services.price_extractor import ExtractionResult
 from sale_monitor.storage.price_history import PriceHistory
+
+
+def _res(price):
+    return ExtractionResult(price=price, selector_source="auto",
+                            currency="CAD", currency_source="html")
 
 
 @pytest.fixture
@@ -67,7 +73,7 @@ def test_below_avg_ignores_failed_records(env, mocker):
                   failed_count=200)
 
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (519.0, "auto", "CAD")
+    mock_extractor.return_value.extract.return_value = _res(519.0)
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
 
@@ -92,7 +98,7 @@ def test_below_avg_no_trigger_when_price_at_average(env, mocker):
                   failed_count=50)
 
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (100.0, "auto", "CAD")
+    mock_extractor.return_value.extract.return_value = _res(100.0)
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
 
@@ -111,7 +117,7 @@ def test_below_avg_no_history_no_trigger(env, mocker):
     _seed_history(env["db"], url, success_prices=[], failed_count=100)
 
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (50.0, "auto", "CAD")
+    mock_extractor.return_value.extract.return_value = _res(50.0)
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
 

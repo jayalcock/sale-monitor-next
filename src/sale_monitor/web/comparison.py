@@ -81,3 +81,14 @@ def normalize_name(name: str) -> str:
 def similar(a: str, b: str) -> float:
     """Return similarity ratio between two strings using SequenceMatcher."""
     return SequenceMatcher(None, a, b).ratio()
+
+
+def numeric_tokens(name: str) -> frozenset:
+    """Digit sequences from a normalized product name (model numbers, sizes,
+    port counts, versions).
+
+    Names whose numeric tokens differ are different SKUs no matter how
+    similar the rest of the string is ("Switch Pro Max 16 PoE" vs
+    "Switch Pro Max 24 PoE"), so suggestion pairing requires equal sets.
+    """
+    return frozenset(re.findall(r"\d+(?:\.\d+)?", normalize_name(name)))

@@ -107,6 +107,7 @@ def api_products():
                 'enabled': p.enabled,
                 'selector': p.selector,
                 'selector_source': selector_source,
+                'scrape_url': getattr(p, 'scrape_url', None),
                 'identifiers': state_data.get('identifiers', {}),
                 'group': getattr(p, 'group', None),
                 'tags': getattr(p, 'tags', []),
@@ -450,6 +451,7 @@ def api_add_product():
             selector=data.get('selector', ''),  # Default to empty string if not provided
             enabled=data.get('enabled', True),
             notification_cooldown_hours=cooldown_hours,
+            scrape_url=(data.get('scrape_url') or '').strip() or None,
             group=data.get('group', '').strip() or None,
             tags=_parse_csv_list(data.get('tags')),
             alert_rules=_parse_csv_list(data.get('alert_rules')),
@@ -534,11 +536,13 @@ def api_update_product():
         except ValueError as ve:
             return jsonify({'error': str(ve)}), 400
 
+        raw_scrape_url = data.get('scrape_url', getattr(p, 'scrape_url', None))
         fields = {
             'name': data.get('name', p.name),
             'target_price': target_price,
             'discount_threshold': discount_threshold,
             'selector': data.get('selector', p.selector),
+            'scrape_url': (raw_scrape_url.strip() or None) if isinstance(raw_scrape_url, str) else raw_scrape_url,
             'enabled': data.get('enabled', p.enabled),
             'notification_cooldown_hours': cooldown_hours,
             'group': data.get('group', p.group).strip() if data.get('group') is not None else p.group,
@@ -667,6 +671,7 @@ def api_export_products():
                 ','.join(getattr(p, 'tags', []) or []),
                 ','.join(getattr(p, 'alert_rules', []) or []),
                 ','.join(getattr(p, 'notification_channels', []) or []),
+                getattr(p, 'scrape_url', None) or '',
             ])
         output.seek(0)
         return Response(
