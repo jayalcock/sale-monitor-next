@@ -166,6 +166,26 @@
         .sm-confirm-ok.primary { background: #0ea5e9; }
         .sm-confirm-ok.primary:hover { background: #38bdf8; }
     </style>
+    <script>
+        // API key support: when the server runs with API_KEY set, write
+        // endpoints require an X-API-Key header.  The key is stored in
+        // localStorage (set it on the Settings page) and attached to every
+        // /api/ request here — it is never embedded in the page itself.
+        (function () {
+            const origFetch = window.fetch;
+            window.fetch = function (input, init) {
+                const url = typeof input === 'string' ? input : (input && input.url) || '';
+                if (url.startsWith('/api/')) {
+                    init = init || {};
+                    const headers = new Headers(init.headers || {});
+                    const key = localStorage.getItem('sm_api_key');
+                    if (key && !headers.has('X-API-Key')) headers.set('X-API-Key', key);
+                    init.headers = headers;
+                }
+                return origFetch.call(this, input, init);
+            };
+        })();
+    </script>
     {% block extra_head %}{% endblock %}
 </head>
 <body class="h-full bg-gray-900">

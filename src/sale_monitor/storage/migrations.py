@@ -117,12 +117,62 @@ def _migration_5_create_purchases_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_6_nullable_price(conn: sqlite3.Connection) -> None:
+    """Allow NULL price and convert failed-check placeholder 0 prices to NULL.
+
+    The original schema declared ``price REAL NOT NULL``, so failed checks
+    were stored with price 0 — a landmine for any aggregate that forgets to
+    filter by check_status.  SQLite can't drop NOT NULL in place, so rebuild
+    the table.
+    """
+    conn.execute("""
+        CREATE TABLE price_history_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_url TEXT NOT NULL,
+            product_name TEXT NOT NULL,
+            price REAL,
+            timestamp TEXT NOT NULL,
+            check_status TEXT DEFAULT 'success',
+            currency TEXT DEFAULT 'CAD',
+            price_cad REAL
+        )
+    """)
+    conn.execute("""
+        INSERT INTO price_history_new
+            (id, product_url, product_name, price, timestamp, check_status, currency, price_cad)
+        SELECT id, product_url, product_name,
+               CASE WHEN check_status <> 'success' AND price = 0 THEN NULL ELSE price END,
+               timestamp, check_status, currency,
+               CASE WHEN check_status <> 'success' AND price_cad = 0 THEN NULL ELSE price_cad END
+        FROM price_history
+    """)
+    conn.execute("DROP TABLE price_history")
+    conn.execute("ALTER TABLE price_history_new RENAME TO price_history")
+    # Recreate the indexes the rebuild dropped
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_url_timestamp "
+        "ON price_history(product_url, timestamp DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_url_status "
+        "ON price_history(product_url, check_status, timestamp DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ph_url_timestamp "
+        "ON price_history(product_url, timestamp)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ph_status ON price_history(check_status)"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     (1, "composite index on product_url+timestamp", _migration_1_add_last_checked_index),
     (2, "index on check_status", _migration_2_add_status_index),
     (3, "create products table", _migration_3_create_products_table),
     (4, "backfill NULL price_cad with approximate rates", _migration_4_backfill_price_cad),
     (5, "create purchases table", _migration_5_create_purchases_table),
+    (6, "nullable price; failed checks store NULL instead of 0", _migration_6_nullable_price),
 ]
 
 

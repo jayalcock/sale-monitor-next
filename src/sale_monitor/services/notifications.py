@@ -89,6 +89,51 @@ class NotificationManager:
 
         self._send_with_retry(msg)
 
+    def send_failure_notification(
+        self,
+        product_name: str,
+        product_url: str,
+        consecutive_failures: int,
+    ) -> None:
+        """Alert that price extraction for a product keeps failing.
+
+        Sent when a previously-working product crosses the consecutive-failure
+        threshold — usually a site redesign broke the selector.
+        """
+        if not self.config.enable:
+            return
+
+        subject = f"Sale Monitor: price check failing for {product_name}"
+        text_body = "\n".join([
+            f"Product: {product_name}",
+            f"URL: {product_url}",
+            f"The last {consecutive_failures} price checks failed in a row.",
+            "",
+            "The product page may have changed (redesign, new selector, bot",
+            "blocking).  Check the Failures page on the dashboard, or open the",
+            "product page and update its CSS selector.",
+        ])
+        html_body = f"""\
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:auto;">
+<h2 style="color:#b91c1c;">Price check failing: {product_name}</h2>
+<p>The last <strong>{consecutive_failures}</strong> price checks failed in a row.</p>
+<p>The product page may have changed (redesign, new selector, bot blocking).
+Check the Failures page on the dashboard, or open the product page and update
+its CSS selector.</p>
+<p><a href="{product_url}" style="color:#b91c1c;">View Product</a></p>
+</body>
+</html>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["From"] = self.config.from_email
+        msg["To"] = self.config.to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        self._send_with_retry(msg)
+
     def _send_with_retry(self, msg: MIMEMultipart) -> None:
         last_exc: Optional[Exception] = None
         for attempt in range(1, self.MAX_RETRIES + 1):

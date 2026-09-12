@@ -11,6 +11,7 @@ A Python application that monitors product prices from online retailers and send
 - **Price history tracking** - SQLite database stores all price checks with configurable retention
 - **Continuous monitoring** - Scheduled checks at configurable intervals (minutes/hours/seconds)
 - **Web dashboard** - Real-time monitoring at http://localhost:5050 (Docker) or http://localhost:5000 (local) with auto-refresh
+- **Breakage alerts** - Email when a product's price check keeps failing (site redesign / selector rot detection)
 - **Docker support** - Ready-to-deploy with docker-compose
 
 ### Query & Analysis
@@ -25,7 +26,7 @@ A Python application that monitors product prices from online retailers and send
 ### Local Installation
 
 ```bash
-# Install dependencies
+# Install dependencies (add requirements-dev.txt for tests/linting)
 pip install -r requirements.txt
 
 # Copy and configure environment
@@ -178,6 +179,21 @@ python -m sale_monitor.cli.main --export-csv history_export.csv
 | `HISTORY_RETENTION_DAYS` | 90 | Days to keep history (0 = forever) |
 | `LOG_LEVEL` | INFO | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `PREFER_DETECTED_CURRENCY` | 1 | When 1/true (default), prefer currency detected from the product page HTML over the CSV-configured currency. Set to 0/false to always use the configured currency. |
+| `FAILURE_ALERT_CONSECUTIVE` | 3 | Email an alert when a product's price check fails this many times in a row (selector rot / site redesign detection). 0 disables. |
+| `API_KEY` | - | When set, write API endpoints require this key in the `X-API-Key` header. Save the key on the dashboard Settings page so the UI sends it automatically. |
+| `API_KEY_READ_REQUIRED` | 0 | When 1/true, read endpoints require the API key too. |
+
+### API Authentication
+
+Setting `API_KEY` protects all state-changing endpoints. The dashboard stores
+the key in your browser's local storage (Settings → Dashboard API Key) and
+attaches it to every request as the `X-API-Key` header. External scripts must
+send the same header — query parameters are not accepted, since they leak
+into access logs.
+
+Notification settings saved on the Settings page (SMTP password, webhook
+URLs) are written to `data/config.json`, which is git-ignored — don't commit
+it.
 
 ### Products CSV Format
 
@@ -203,62 +219,50 @@ Note: The dashboard derives the Merchant column from the product URL (domain), s
 sale-monitor-next
 ├── src/
 │   └── sale_monitor/
-│       ├── __init__.py
 │       ├── cli/
-│       │   ├── __init__.py
-│       │   └── main.py
+│       │   └── main.py            # CLI orchestrator + scheduler
 │       ├── domain/
-│       │   ├── __init__.py
-│       │   └── models.py
+│       │   └── models.py          # Product dataclass
 │       ├── services/
-│       │   ├── __init__.py
-│       │   ├── notifications.py
-│       │   ├── price_extractor.py
-│       │   └── scheduler.py
+│       │   ├── price_check.py     # shared check pipeline (CLI + web)
+│       │   ├── price_extractor.py # fetch + selector/JSON-LD extraction
+│       │   ├── auto_detector.py   # per-retailer selector heuristics
+│       │   ├── exchange_rates.py  # currency conversion + caching
+│       │   ├── notifications.py   # SMTP (sale + failure alerts)
+│       │   ├── webhooks.py        # Discord/Slack
+│       │   ├── product_images.py  # image discovery/resize/cache + warmup
+│       │   └── http_safety.py     # SSRF-safe fetching
 │       ├── storage/
-│       │   ├── __init__.py
-│       │   ├── base.py
-│       │   ├── csv_products.py
-│       │   ├── file_lock.py
-│       │   ├── json_state.py
-│       │   ├── json_store.py
-│       │   ├── price_history.py
-│       │   └── sqlite_store.py
-│       └── web/
-│           ├── __init__.py
-│           ├── app.py
-│           ├── routes/
-│           │   ├── __init__.py
-│           │   └── products.py
-│           ├── templates/
-│           │   ├── base.html
-│           │   ├── index.html
-│           │   └── product_detail.html
-│           └── static/
-│               └── img/
-│                   └── icon.png (you add this)
+│       │   ├── product_store.py   # products table (source of truth)
+│       │   ├── price_history.py   # price_history table (WAL mode)
+│       │   ├── json_state.py      # transient state.json (locked writes)
+│       │   ├── config_store.py    # settings JSON
+│       │   ├── csv_products.py    # CSV import/export
+│       │   ├── migrations.py      # versioned schema migrations
+│       │   └── file_lock.py       # fcntl-based lock
+│       ├── web/
+│       │   ├── app.py             # Flask app factory
+│       │   ├── auth.py            # optional X-API-Key auth
+│       │   ├── helpers.py         # caches, pagination
+│       │   ├── comparison.py      # competitive grouping
+│       │   ├── extensions.py      # rate limiter
+│       │   ├── routes/            # blueprints: pages, products, history,
+│       │   │                      #   alerts, compare, settings, health,
+│       │   │                      #   images, purchases
+│       │   ├── templates/
+│       │   └── static/
+│       ├── logging_config.py
+│       └── utils.py
 ├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_cli_cooldown.py
-│   ├── test_json_state.py
-│   ├── test_notifications.py
-│   ├── test_price_extractor.py
-│   └── test_price_history.py
-├── archived/
-│   └── index-cards-layout.html (previous dashboard layout)
-├── data/
-│   ├── products.csv
-│   ├── state.json
-│   └── history.db
+├── data/                          # runtime data (git-ignored)
+│   ├── config.example.json
+│   ├── products.example.csv
+│   └── state.example.json
 ├── .env.example
-├── .gitignore
 ├── docker-compose.yml
-├── DOCKER.md
 ├── Dockerfile
-├── pyproject.toml
-├── pytest.ini
-├── requirements.txt
+├── requirements.txt               # runtime deps (Docker installs these)
+├── requirements-dev.txt           # + pytest, mypy, pylint, stubs
 └── README.md
 ```
 

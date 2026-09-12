@@ -9,8 +9,11 @@ Sale Monitor is a Python price monitoring application with a Flask web dashboard
 ## Commands
 
 ```bash
-# Install dependencies
+# Install runtime dependencies (what the Docker image uses)
 pip install -r requirements.txt
+
+# Install dev/test tooling as well (pytest, mypy, pylint, stubs)
+pip install -r requirements-dev.txt
 
 # Run one-time price check
 PYTHONPATH=src python -m sale_monitor.cli.main --products-csv data/products.csv --state-file data/state.json
@@ -39,15 +42,16 @@ mypy src
 ## Architecture
 
 **Entry points:**
-- `src/sale_monitor/cli/main.py` — CLI orchestrator: reads products, extracts prices in parallel (ThreadPoolExecutor, 4 workers), records history, evaluates alerts, sends notifications
-- `src/sale_monitor/web/app.py` — Flask app factory with route registration, mtime-cached state reader
+- `src/sale_monitor/cli/main.py` — CLI orchestrator: runs checks via `PriceCheckService` in parallel (ThreadPoolExecutor, 4 workers), evaluates alert rules, sends notifications, schedules image warmup
+- `src/sale_monitor/web/app.py` — Flask app factory: creates shared stores/services in `app.config` and registers the blueprints in `web/routes/`
 
 **Layer structure:**
 - `domain/models.py` — Product dataclass
-- `services/` — Business logic: `price_extractor.py` (fetch + CSS selector extraction), `auto_detector.py` (60+ hardcoded selectors for major retailers), `notifications.py` (SMTP with retry), `exchange_rates.py` (currency conversion), `webhooks.py` (Discord/Slack)
-- `storage/` — Persistence: `product_store.py` and `price_history.py` (SQLite with WAL mode), `json_state.py` (transient cooldown state), `csv_products.py` (import/export), `config_store.py` (settings JSON), `migrations.py` (schema versioning), `file_lock.py` (fcntl-based)
-- `web/templates/` — Jinja2 templates for dashboard, manage, alerts, product detail, settings, compare views
-- `web/auth.py` — Optional API key authentication
+- `services/` — Business logic: `price_check.py` (the shared extract→currency→convert→record pipeline used by CLI and web), `price_extractor.py` (fetch + CSS selector extraction, returns `ExtractionResult`), `auto_detector.py` (60+ hardcoded selectors for major retailers), `notifications.py` (SMTP with retry), `exchange_rates.py` (currency conversion), `webhooks.py` (Discord/Slack), `product_images.py` (image discovery/resize/cache + warmup), `http_safety.py` (SSRF-safe fetching for user-supplied URLs)
+- `storage/` — Persistence: `product_store.py` and `price_history.py` (SQLite with WAL mode; all timestamps and cutoffs are UTC ISO strings), `json_state.py` (transient cooldown state; use `mutate_state` for read-modify-write so concurrent writers don't clobber each other), `csv_products.py` (import/export), `config_store.py` (settings JSON — git-ignored because it can hold SMTP/webhook secrets), `migrations.py` (schema versioning), `file_lock.py` (fcntl-based)
+- `web/routes/` — Blueprints: pages, products, history, alerts, compare, settings, health, images, purchases
+- `web/helpers.py` — mtime-cached state/product readers, pagination, alerts-cache invalidation
+- `web/auth.py` — Optional API key authentication (X-API-Key header only)
 
 **Data flow:** Products live in SQLite (source of truth). CSV is import/export only. Price checks write to `price_history` table. Transient notification cooldown state stored in `data/state.json`. Exchange rates cached in SQLite.
 

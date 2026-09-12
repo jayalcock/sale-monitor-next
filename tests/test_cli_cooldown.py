@@ -9,6 +9,13 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from sale_monitor.cli.main import main
+from sale_monitor.services.price_extractor import ExtractionResult
+
+
+def _res(price):
+    """ExtractionResult as the mocked extractor returns it."""
+    return ExtractionResult(price=price, selector_source="manual",
+                            currency="CAD", currency_source="html")
 
 
 @pytest.fixture
@@ -52,7 +59,7 @@ def test_first_notification_sent(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (95.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(95.0)
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -80,7 +87,7 @@ def test_cooldown_suppression_same_price(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (95.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(95.0)
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -120,7 +127,7 @@ def test_cooldown_expiry_sends_notification(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (95.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(95.0)
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -169,7 +176,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
     # First run - price at 95.0
-    mock_extractor.return_value.extract_price_with_currency.return_value = (95.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(95.0)
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time
         mock_dt.fromisoformat = datetime.fromisoformat
@@ -180,7 +187,7 @@ def test_price_drop_during_cooldown_sends_notification(temp_env, mocker):
     mock_send.reset_mock()
     
     # Second run - 1 hour later, price drops to 85.0 (within cooldown but different price)
-    mock_extractor.return_value.extract_price_with_currency.return_value = (85.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(85.0)
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat
@@ -202,7 +209,7 @@ def test_per_product_cooldown_from_csv(temp_env, mocker):
     ])
     
     mock_extractor = mocker.patch("sale_monitor.cli.main.PriceExtractor")
-    mock_extractor.return_value.extract_price_with_currency.return_value = (95.0, 'manual', 'CAD')
+    mock_extractor.return_value.extract.return_value = _res(95.0)
     
     mock_notifier = mocker.patch("sale_monitor.cli.main.NotificationManager")
     mock_send = mock_notifier.return_value.send_sale_notification
@@ -259,8 +266,15 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     mock_history = mocker.patch("sale_monitor.cli.main.PriceHistory")
     mock_history.return_value.cleanup_old_records.return_value = 0
     
-    # Both products at target price
-    mock_extractor.return_value.extract_price_with_currency.side_effect = [(95.0, 'manual', 'CAD'), (95.0, 'manual', 'CAD')]
+    # Both products at target price.  Key the mock on URL: products are
+    # checked concurrently, so an ordered side_effect list would be racy.
+    def _by_url(prices):
+        return lambda url, *a, **kw: _res(prices[url])
+
+    mock_extractor.return_value.extract.side_effect = _by_url({
+        "https://example.com/a": 95.0,
+        "https://example.com/b": 95.0,
+    })
     
     base_time = datetime(2025, 10, 30, 12, 0, 0)
     
@@ -275,7 +289,10 @@ def test_multiple_products_independent_cooldowns(temp_env, mocker):
     mock_send.reset_mock()
     
     # Second run - 1 hour later, Product A changes price, Product B same
-    mock_extractor.return_value.extract_price_with_currency.side_effect = [(85.0, 'manual', 'CAD'), (95.0, 'manual', 'CAD')]
+    mock_extractor.return_value.extract.side_effect = _by_url({
+        "https://example.com/a": 85.0,
+        "https://example.com/b": 95.0,
+    })
     with patch("sale_monitor.cli.main.datetime") as mock_dt:
         mock_dt.now.return_value = base_time + timedelta(hours=1)
         mock_dt.fromisoformat = datetime.fromisoformat

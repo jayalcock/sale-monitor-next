@@ -2,12 +2,32 @@ import logging
 import re
 import time
 import json
+from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict, Any
 
 import requests
 from bs4 import BeautifulSoup
 
 from sale_monitor.services.auto_detector import PriceAutoDetector
+
+
+@dataclass
+class ExtractionResult:
+    """Outcome of a single price extraction.
+
+    Returned by :meth:`PriceExtractor.extract` so results never travel via
+    mutable extractor attributes (which made instances unsafe to share
+    across threads).
+    """
+    price: Optional[float] = None
+    selector_source: str = ""
+    currency: Optional[str] = None
+    currency_source: str = "default"
+    identifiers: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def success(self) -> bool:
+        return self.price is not None
 
 
 class PriceExtractor:
@@ -134,21 +154,29 @@ class PriceExtractor:
 
     # --- Currency helpers (non-breaking additions) ---
     def extract_price_with_currency(self, url: str, selector: str = "", default_currency: str = "CAD") -> Tuple[Optional[float], str, str]:
-        """Extract price and attempt to infer currency.
+        """Backward-compatible tuple wrapper around :meth:`extract`.
 
-        Returns (price, selector_source, currency).
-        Currency inference falls back to default_currency if not inferable.
+        Returns (price, selector_source, currency) and mirrors the result
+        onto ``last_identifiers`` / ``last_currency_source`` for callers
+        that still read those attributes.  New code should call
+        :meth:`extract` and use the returned :class:`ExtractionResult`.
+        """
+        result = self.extract(url, selector, default_currency=default_currency)
+        self.last_identifiers = dict(result.identifiers)
+        self.last_currency_source = result.currency_source
+        return result.price, result.selector_source, result.currency or default_currency
+
+    def extract(self, url: str, selector: str = "", default_currency: str = "CAD") -> ExtractionResult:
+        """Extract price, currency, and product identifiers from a page.
+
+        Currency inference falls back to *default_currency* if not inferable.
         """
         price, source = self.extract_price(url, selector)
-
-        # Reset per-call state so stale identifiers from a previous product
-        # never leak into the current one.
-        self.last_identifiers = {}
+        identifiers: Dict[str, Any] = {}
 
         detected_currency: Optional[str] = None
         heuristic_currency: Optional[str] = None
         host_guess_currency: Optional[str] = None
-        self.last_currency_source = 'default'
         # Try to fetch HTML to detect currency from page content (JSON-LD/meta/Shopify)
         # Skip detection for known test/local hosts and when explicitly disabled via env.
         from urllib.parse import urlparse
@@ -178,9 +206,9 @@ class PriceExtractor:
                     detected_currency = self._detect_currency_from_html(html_text, url)
                     # Also extract identifiers from HTML (JSON-LD/meta common fields)
                     try:
-                        self.last_identifiers = self._extract_identifiers_from_html(html_text)
+                        identifiers = self._extract_identifiers_from_html(html_text)
                     except Exception:
-                        self.last_identifiers = {}
+                        identifiers = {}
                     # ui.com lists the JSON-LD/displayPrice without mandatory
                     # surcharges (eco/recycling fees), but the storefront — and
                     # the customer — pays displayPriceWithSurcharges. Prefer that.
@@ -206,15 +234,21 @@ class PriceExtractor:
         currency = detected_currency or heuristic_currency or host_guess_currency or default_currency
 
         if detected_currency:
-            self.last_currency_source = 'html'
+            currency_source = 'html'
         elif heuristic_currency:
-            self.last_currency_source = 'heuristic'
+            currency_source = 'heuristic'
         elif host_guess_currency:
-            self.last_currency_source = 'host'
+            currency_source = 'host'
         else:
-            self.last_currency_source = 'default'
+            currency_source = 'default'
 
-        return price, source, currency
+        return ExtractionResult(
+            price=price,
+            selector_source=source,
+            currency=currency,
+            currency_source=currency_source,
+            identifiers=identifiers,
+        )
 
     def _uicom_price_with_surcharges(self, html: str, base_price: float) -> Optional[float]:
         """Return ui.com's surcharge-inclusive price for the variant matching *base_price*.
@@ -255,8 +289,8 @@ class PriceExtractor:
             return None
 
         # 1) JSON-LD blocks
-        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
-            block = m.group(1).strip()
+        for jm in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = jm.group(1).strip()
             try:
                 data = json.loads(block)
             except json.JSONDecodeError:
@@ -427,9 +461,9 @@ class PriceExtractor:
         """
         if not html:
             return None
-        prices = []
-        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
-            block = m.group(1).strip()
+        prices: list = []
+        for jm in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = jm.group(1).strip()
             try:
                 data = json.loads(block)
             except json.JSONDecodeError:
@@ -489,8 +523,8 @@ class PriceExtractor:
             return result
 
         # 1) JSON-LD blocks — only walk Product-typed nodes
-        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
-            block = m.group(1).strip()
+        for jm in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, re.I | re.S):
+            block = jm.group(1).strip()
             try:
                 data = json.loads(block)
             except json.JSONDecodeError:

@@ -66,13 +66,14 @@ def test_post_with_valid_api_key_header(tmp_path):
     assert resp.status_code == 200
 
 
-def test_post_with_valid_api_key_query_param(tmp_path):
+def test_query_param_api_key_rejected(tmp_path):
+    """Query-param keys leak into access logs, so only the header is accepted."""
     client = make_client(tmp_path, api_key="test-secret-key")
     resp = client.post(
         "/api/product/delete?api_key=test-secret-key",
         json={"url": "https://example.com/w"},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 401
 
 
 def test_post_with_wrong_api_key_returns_401(tmp_path):

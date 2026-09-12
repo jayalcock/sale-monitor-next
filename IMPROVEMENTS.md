@@ -1,5 +1,27 @@
 # Sale Monitor Next — Improvement Areas
 
+## 15. 2026-09 Review Fixes  ✅ Resolved
+- `below_avg` alert rule no longer averages in failed checks (stored as price 0)
+- All history cutoffs and state timestamps are UTC ISO strings (were naive local, shifting every "last N days" window by the UTC offset)
+- `state.json` writes go through `mutate_state` (read-merge-write under the lock) so CLI cycles and web endpoints can't clobber each other's entries
+- `/api/alerts` cache invalidated on product add/update/toggle/delete (was keyed on state.json mtime only)
+- `data/config.json` untracked from git (it stores SMTP/webhook secrets once notifications are configured); stray `history.db.old`/`history.db.from-server` untracked too
+- SSRF guard now validates every redirect hop (`services/http_safety.safe_get`) for image and fetch-info requests
+- API key: constant-time compare, header-only (query param leaked into access logs)
+- Duplicated check pipeline extracted into `services/price_check.PriceCheckService` (was copy-pasted across CLI + 3 web endpoints)
+- `PriceExtractor.extract()` returns an `ExtractionResult` instead of passing results via instance attributes
+- `web/app.py` split into blueprints under `web/routes/`; image warmup moved from a Flask background thread into the CLI monitor loop
+- `/api/products/check-all` runs checks in a thread pool (sequential version could exceed the 30s gunicorn timeout)
+- `get_recent_success_batch` is a single window-function query (was one query per URL)
+
+## 16. 2026-09 Follow-up Batch  ✅ Resolved
+- Selector-rot alerting: email sent when a product crosses `FAILURE_ALERT_CONSECUTIVE` (default 3) failed checks in a row — fires once per outage
+- Dashboard works with `API_KEY` set: key stored in browser localStorage (Settings page), attached as `X-API-Key` by a fetch wrapper in `base.html`
+- Migration 6: `price` column nullable; failed checks store NULL instead of 0
+- `requirements-dev.txt` split from runtime deps (Docker image no longer installs pytest/pylint); `mypy src` passes clean and stubs are installed
+- Dead auto-discovery env vars removed from `.env` (code lives in `archived/`); `data/products.csv` + `data/discovery_cache.json` untracked per `.gitignore` intent
+- GitHub Actions workflow runs pytest + mypy on Python 3.11 and 3.13
+
 ## 1. Concurrency & File Locking  ✅ Resolved
 - ~~`state.json` uses a basic spinlock (0.1s polling)~~
 - Now uses OS-level `fcntl.flock()` via `FileLock` class in `storage/file_lock.py`

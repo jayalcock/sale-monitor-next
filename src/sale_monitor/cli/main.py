@@ -5,150 +5,154 @@ Sale Monitor CLI - Command-line interface for the Sale Monitor application.
 import argparse
 import logging
 import os
+import re
 import time
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 
 import schedule
 from dotenv import load_dotenv
 
 from sale_monitor.services.exchange_rates import ExchangeRateService
+from sale_monitor.services.price_check import PriceCheckService
 from sale_monitor.services.price_extractor import PriceExtractor
-from sale_monitor.storage.config_store import get_base_currency, load_notification_config
-from sale_monitor.storage.json_state import load_state, save_state, prune_stale_entries
+from sale_monitor.storage.json_state import load_state, mutate_state, prune_stale_entries
 from sale_monitor.storage.price_history import PriceHistory
 from sale_monitor.storage.product_store import ProductStore
 from sale_monitor.services.notifications import NotificationManager, SmtpConfig
-from sale_monitor.services.webhooks import build_notifiers_from_config
+from sale_monitor.utils import env_bool, str_to_bool
 
 
-def _str_to_bool(v: str, default: bool = False) -> bool:
-    if v is None:
-        return default
-    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+def build_check_service(args, history=None) -> PriceCheckService:
+    """Create the shared check service from CLI args (with safe defaults)."""
+    user_agent = getattr(args, 'user_agent', None) or "Mozilla/5.0 (compatible; SaleMonitor/1.0)"
+    timeout = getattr(args, 'timeout', None) or 30
+    max_retries = getattr(args, 'max_retries', None) or 3
+    return PriceCheckService(
+        user_agent=user_agent,
+        timeout=timeout,
+        max_retries=max_retries,
+        history=history,
+        ex_service=ExchangeRateService(cache_handler=history),
+        config_file=os.getenv('CONFIG_FILE', 'data/config.json'),
+        # Fresh extractor per check; referencing the name imported here keeps
+        # the class patchable in tests via sale_monitor.cli.main.PriceExtractor.
+        extractor_factory=lambda: PriceExtractor(
+            user_agent=user_agent, timeout=timeout, max_retries=max_retries
+        ),
+    )
 
 
-def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
+def _cooldown_active(now_dt, last_sent_str, cooldown_hours) -> bool:
+    """True if *now_dt* is still within the cooldown window after *last_sent_str*."""
+    if not last_sent_str:
+        return False
+    try:
+        last_sent = datetime.fromisoformat(last_sent_str)
+    except (ValueError, TypeError):
+        return False
+    # Normalize aware/naive mismatches (legacy state entries were naive)
+    if (last_sent.tzinfo is None) != (now_dt.tzinfo is None):
+        if last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
+        else:
+            last_sent = last_sent.replace(tzinfo=None)
+    return now_dt < (last_sent + timedelta(hours=cooldown_hours))
+
+
+def _evaluate_alert_rules(p, price, old_price, history):
+    """Return the triggered-by label for the first matching alert rule, or None."""
+    rules = p.alert_rules if p.alert_rules else ['target', 'discount']
+
+    for rule in rules:
+        if rule == 'target' and p.target_price is not None and price <= p.target_price:
+            return "target_price"
+        if rule == 'discount' and p.discount_threshold is not None and old_price is not None:
+            try:
+                threshold_price = float(old_price) * (1 - float(p.discount_threshold) / 100.0)
+                if price <= threshold_price:
+                    return f"discount_{p.discount_threshold:.0f}%"
+            except (TypeError, ValueError):
+                pass
+        if rule == 'any_change' and old_price is not None and price != old_price:
+            return "any_change"
+        if rule == 'price_drop' and old_price is not None and price < old_price:
+            return "price_drop"
+        if rule == 'below_avg' and history is not None:
+            try:
+                records = history.get_history(p.url, days=30)
+                # Failed checks are stored with price 0 — only successful
+                # checks may contribute to the average.
+                prices_hist = [
+                    r[1] for r in records
+                    if r[2] == 'success' and r[1] is not None
+                ]
+                if prices_hist:
+                    avg = sum(prices_hist) / len(prices_hist)
+                    if price < avg:
+                        return "below_avg"
+            except Exception:
+                pass
+    return None
+
+
+def check_prices(args, smtp_cfg, notifier, service=None, history=None, store=None):
     """Check prices for all products - extracted for scheduling."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     if store is None:
         store = ProductStore(args.history_db)
+    if service is None:
+        service = build_check_service(args, history=history)
     products = store.get_all()
+    # Snapshot for decision-making (old price, cooldown bookkeeping); the
+    # final write re-reads the file under the lock so concurrent web writes
+    # to other products aren't clobbered.
     state = load_state(args.state_file)
-    ex_service = ExchangeRateService(cache_handler=history)
-
-    # Resolve config + base currency once (was re-read per product inside the loop)
-    config_file = os.getenv('CONFIG_FILE', 'data/config.json')
-    base_currency = get_base_currency(config_file)
-
-    # Build webhook notifiers (Discord/Slack) once per run. Previously these were
-    # configured but never dispatched from the monitor loop — only email was sent.
-    notif_cfg = load_notification_config(config_file)
-    webhook_notifiers = build_notifiers_from_config(notif_cfg.get('webhooks', []))
-    if webhook_notifiers:
-        logging.info(
-            f"Webhook channels active: {', '.join(n.name for n in webhook_notifiers)}"
-        )
 
     enabled = [p for p in products if p.enabled]
     logging.info(f"Checking {len(enabled)} enabled products")
 
     # Phase 1: Extract prices in parallel (I/O bound)
-    max_workers = min(4, len(enabled)) if enabled else 1
+    results = []
+    if enabled:
+        max_workers = min(4, len(enabled))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_product = {pool.submit(service.check, p): p for p in enabled}
+            for future in as_completed(future_to_product):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    p = future_to_product[future]
+                    logging.error(f"{p.name}: extraction thread error: {e}")
 
-    def _extract(p):
-        # Use a per-thread extractor instance. The extractor communicates the
-        # detected identifiers (and cached page HTML) via mutable instance
-        # attributes (last_identifiers, _last_response_html); sharing one
-        # instance across worker threads let those attributes be overwritten
-        # mid-flight, smearing one product's identifiers onto another and
-        # creating bogus competitive groups. A fresh instance per call isolates
-        # that state.
-        local_extractor = PriceExtractor(
-            user_agent=args.user_agent,
-            timeout=args.timeout,
-            max_retries=args.max_retries,
-        )
-        result = local_extractor.extract_price_with_currency(p.url, p.selector, default_currency=p.currency)
-        identifiers = dict(getattr(local_extractor, 'last_identifiers', None) or {})
-        return p, result, identifiers
+    # Keep results in product order for stable logs
+    order = {p.url: i for i, p in enumerate(enabled)}
+    results.sort(key=lambda r: order.get(r.product.url, 0))
 
-    extraction_results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        future_to_product = {pool.submit(_extract, p): p for p in enabled}
-        for future in as_completed(future_to_product):
-            try:
-                extraction_results.append(future.result())
-            except Exception as e:
-                p = future_to_product[future]
-                logging.error(f"{p.name}: extraction thread error: {e}")
-                extraction_results.append((p, (None, None, None), {}))
-
-    # Phase 2: Process results sequentially (state updates, notifications)
-    updated = 0
-    for p, (price, selector_source, detected_currency), new_identifiers in extraction_results:
-        if price is None:
+    # Phase 2: Process results sequentially (notifications, state updates)
+    failure_alert_after = int(os.getenv('FAILURE_ALERT_CONSECUTIVE', '3'))
+    to_apply = []
+    for result in results:
+        p = result.product
+        if not result.success:
             logging.warning(f"{p.name}: price not found")
-            # Record failure in history for alerts tracking
-            if history:
-                history.record_price(p.url, p.name, None, status='failed', currency=p.currency or 'CAD')
+            # Alert exactly once when a product crosses the consecutive-failure
+            # threshold (selector rot, redesign, bot blocking).  A recovery
+            # followed by another streak alerts again.
+            if smtp_cfg.enable and history is not None and failure_alert_after > 0:
+                try:
+                    streak = history.get_consecutive_failures(p.url)
+                    if streak == failure_alert_after:
+                        notifier.send_failure_notification(p.name, p.url, streak)
+                        logging.info(f"{p.name}: failure notification sent ({streak} consecutive failures)")
+                except Exception as e:
+                    logging.error(f"{p.name}: failure notification error: {e}")
             continue
-        
-        # Choose currency with preference for detected when available (configurable)
-        prefer_detected = _str_to_bool(os.getenv('PREFER_DETECTED_CURRENCY', '1'), True)
-        if prefer_detected and detected_currency:
-            currency = detected_currency
-            currency_source = 'detected'
-        elif getattr(p, 'currency', None):
-            currency = p.currency
-            currency_source = 'configured'
-        else:
-            currency = detected_currency or 'CAD'
-            currency_source = 'detected' if detected_currency else 'default'
-        
-        # Compute base-currency price so historical records reflect the
-        # exchange rate at check time rather than being recomputed later.
-        # (config_file / base_currency resolved once above.)
-        price_in_base = None
-        if currency == base_currency:
-            price_in_base = price
-        elif history:
-            try:
-                converted = ex_service.convert(float(price), currency, base_currency)
-                price_in_base = converted if converted is not None else None
-            except Exception:
-                pass
 
-        # Record price in history
-        if history:
-            history.record_price(p.url, p.name, price, currency=currency, price_cad=price_in_base)
-
-        now = datetime.now().isoformat()
-        key = p.url  # Use URL as stable key
-        rec = state.get(key, {})
+        price = result.price
+        rec = state.get(p.url, {})
+        if not isinstance(rec, dict):
+            rec = {}
         old_price = rec.get("current_price")
-
-        # Extract identifiers from current scrape
-        # (new_identifiers was captured per-thread during Phase 1)
-        # Preserve existing identifiers and group_key, merge with new ones
-        preserved_identifiers = rec.get('identifiers', {})
-        merged_identifiers = {**preserved_identifiers, **new_identifiers} if new_identifiers else preserved_identifiers
-
-        # Persist price check
-        rec.update({
-            "name": p.name,
-            "url": p.url,
-            "selector": p.selector,
-            "selector_source": selector_source,  # Track how selector was determined
-            "current_price": price,
-            "last_checked": now,
-            "last_price": old_price,
-            "currency": currency,
-            "currency_source": currency_source,
-            "price_in_base": price_in_base,
-            "identifiers": merged_identifiers,
-            "group_key": rec.get("group_key"),  # Preserve manual group_key
-        })
 
         # Log price change
         if old_price is None:
@@ -158,119 +162,55 @@ def check_prices(args, smtp_cfg, notifier, extractor, history=None, store=None):
         else:
             logging.info(f"{p.name}: ${price:.2f} (no change)")
 
-        # Determine if we should notify
-        should_notify = False
-        triggered_by = None
-
-        # Determine which rules to evaluate
-        rules = p.alert_rules if p.alert_rules else ['target', 'discount']
-
-        for rule in rules:
-            if should_notify:
-                break
-            if rule == 'target' and p.target_price is not None and price <= p.target_price:
-                should_notify = True
-                triggered_by = "target_price"
-            elif rule == 'discount' and p.discount_threshold is not None and old_price is not None:
-                try:
-                    threshold_price = float(old_price) * (1 - float(p.discount_threshold) / 100.0)
-                    if price <= threshold_price:
-                        should_notify = True
-                        triggered_by = f"discount_{p.discount_threshold:.0f}%"
-                except Exception:
-                    pass
-            elif rule == 'any_change' and old_price is not None and price != old_price:
-                should_notify = True
-                triggered_by = "any_change"
-            elif rule == 'price_drop' and old_price is not None and price < old_price:
-                should_notify = True
-                triggered_by = "price_drop"
-            elif rule == 'below_avg' and history is not None:
-                try:
-                    records = history.get_history(p.url, days=30)
-                    prices_hist = [r[1] for r in records if r[1] is not None]
-                    if prices_hist:
-                        avg = sum(prices_hist) / len(prices_hist)
-                        if price < avg:
-                            should_notify = True
-                            triggered_by = "below_avg"
-                except Exception:
-                    pass
+        triggered_by = _evaluate_alert_rules(p, price, old_price, history)
 
         # Cooldown and de-dup checks
-        if should_notify and (smtp_cfg.enable or webhook_notifiers):
+        extra_fields = {}
+        if triggered_by and smtp_cfg.enable:
+            now_dt = datetime.now(timezone.utc)
             cooldown_hours = p.notification_cooldown_hours or args.default_cooldown_hours
-            last_sent_str = rec.get("last_notification_sent")
-            last_sent = None
-            if last_sent_str:
-                try:
-                    last_sent = datetime.fromisoformat(last_sent_str)
-                except Exception:
-                    last_sent = None
-
-            in_cooldown = False
-            if last_sent:
-                in_cooldown = datetime.now() < (last_sent + timedelta(hours=cooldown_hours))
+            in_cooldown = _cooldown_active(now_dt, rec.get("last_notification_sent"), cooldown_hours)
+            # Extra suppression for target trigger: if we've already sent a
+            # target notification and we're still at/under target within
+            # cooldown, skip duplicate emails even if the price barely moved.
+            target_in_cooldown = _cooldown_active(now_dt, rec.get("last_target_notification"), cooldown_hours)
 
             last_notified_price = rec.get("last_notification_price")
+            same_price = last_notified_price is not None and float(last_notified_price) == float(price)
 
-            # Better-price gate: within the cooldown window, only re-notify if the
-            # price has dropped BELOW the price we last notified at. This stops spam
-            # from small fluctuations (a price wobbling a dollar or two) and from
-            # persistent rules like below_avg that are true on every check. A genuine
-            # new low still alerts immediately, even inside the cooldown window.
-            if in_cooldown and last_notified_price is not None and float(price) >= float(last_notified_price):
-                logging.info(f"{p.name}: notification suppressed (cooldown, no new low)")
-                pass
+            if in_cooldown and same_price:
+                logging.info(f"{p.name}: notification suppressed (cooldown, same price)")
+            elif triggered_by == "target_price" and target_in_cooldown and same_price:
+                logging.info(f"{p.name}: notification suppressed (target cooldown, same price)")
             else:
-                # Dispatch to every configured channel: email (if enabled) and
-                # all enabled webhooks. State timestamps are updated if any
-                # channel succeeds, so the cooldown applies across channels.
-                sent_any = False
-                if smtp_cfg.enable:
-                    try:
-                        notifier.send_sale_notification(
-                            product_name=p.name,
-                            product_url=p.url,
-                            current_price=price,
-                            currency=currency,
-                            price_in_base=price_in_base,
-                            base_currency=base_currency,
-                            old_price=old_price,
-                            target_price=p.target_price,
-                            triggered_by=triggered_by or "rule",
-                        )
-                        sent_any = True
-                    except Exception as e:
-                        logging.error(f"{p.name}: email failed: {e}")
-                for wn in webhook_notifiers:
-                    try:
-                        ok = wn.send(
-                            product_name=p.name,
-                            product_url=p.url,
-                            current_price=price,
-                            currency=currency,
-                            price_in_base=price_in_base,
-                            base_currency=base_currency,
-                            old_price=old_price,
-                            target_price=p.target_price,
-                            triggered_by=triggered_by or "rule",
-                        )
-                        sent_any = sent_any or bool(ok)
-                    except Exception as e:
-                        logging.error(f"{p.name}: webhook {wn.name} failed: {e}")
-                if sent_any:
-                    rec["last_notification_sent"] = datetime.now().isoformat()
-                    rec["last_notification_price"] = price
+                try:
+                    notifier.send_sale_notification(
+                        product_name=p.name,
+                        product_url=p.url,
+                        current_price=price,
+                        old_price=old_price,
+                        target_price=p.target_price,
+                        triggered_by=triggered_by or "rule",
+                    )
+                    sent_at = datetime.now(timezone.utc).isoformat()
+                    extra_fields["last_notification_sent"] = sent_at
+                    extra_fields["last_notification_price"] = price
                     if triggered_by == "target_price":
-                        rec["last_target_notification"] = rec["last_notification_sent"]
+                        extra_fields["last_target_notification"] = sent_at
                     logging.info(f"{p.name}: notification sent")
+                except Exception as e:
+                    logging.error(f"{p.name}: email failed: {e}")
 
-        state[key] = rec
-        updated += 1
+        to_apply.append((result, extra_fields))
 
-    # Save state once after processing all products (atomic write protects against partial loss)
-    save_state(args.state_file, state)
+    # Save state once, merging against the current file contents so writes
+    # from the web app during this cycle survive.
+    def _mutator(fresh_state):
+        for result, extra_fields in to_apply:
+            service.apply_to_state(fresh_state, result, extra_fields=extra_fields)
+
+    mutate_state(args.state_file, _mutator)
+    updated = len(to_apply)
     logging.info(f"Updated {updated} products. State saved to {args.state_file}.")
     return updated
 
@@ -289,9 +229,9 @@ def main() -> int:
     parser.add_argument("--max-retries", type=int, default=int(os.getenv("MAX_RETRIES", "3")))
     parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
     parser.add_argument("--default-cooldown-hours", type=int, default=int(os.getenv("NOTIFICATION_COOLDOWN_HOURS", "24")))
-    parser.add_argument("--every", default=os.getenv("CHECK_INTERVAL", ""), 
+    parser.add_argument("--every", default=os.getenv("CHECK_INTERVAL", ""),
                        help="Run continuously at interval (e.g., '15m', '1h', '30s'). Omit for one-time run.")
-    
+
     # Query commands
     parser.add_argument("--show-history", metavar="PRODUCT_NAME",
                        help="Show price history for a product")
@@ -303,7 +243,7 @@ def main() -> int:
                        help="Export history to CSV file")
     parser.add_argument("--days", type=int, default=30,
                        help="Number of days for history queries (default: 30)")
-    
+
     args = parser.parse_args()
 
     from sale_monitor.logging_config import setup_logging
@@ -323,53 +263,54 @@ def main() -> int:
 
     # Handle query commands
     if args.list_products:
-        products = history.get_all_products()
-        if not products:
+        product_rows = history.get_all_products()
+        if not product_rows:
             print("No products found in history.")
             return 0
         print(f"\n{'Product Name':<50} {'URL':<50}")
         print("=" * 100)
-        for url, name in products:
+        for url, name in product_rows:
             print(f"{name:<50} {url:<50}")
         return 0
-    
+
     if args.show_history:
         product_name = args.show_history
         products = store.get_all()
         product = next((p for p in products if p.name.lower() == product_name.lower()), None)
-        
+
         if not product:
             print(f"Product '{product_name}' not found")
             return 1
-        
+
         hist = history.get_history(product.url, days=args.days, limit=100)
         if not hist:
             print(f"No history found for '{product_name}'")
             return 0
-        
+
         print(f"\nPrice History for: {product.name}")
         print(f"URL: {product.url}")
         print(f"Last {args.days} days (max 100 records)\n")
         print(f"{'Timestamp':<20} {'Price':<10} {'Status':<10}")
         print("=" * 40)
         for timestamp, price, status in hist:
-            print(f"{timestamp:<20} ${price:<9.2f} {status:<10}")
+            price_str = f"${price:<9.2f}" if price is not None else f"{'—':<10}"
+            print(f"{timestamp:<20} {price_str} {status:<10}")
         return 0
-    
+
     if args.show_stats:
         product_name = args.show_stats
         products = store.get_all()
         product = next((p for p in products if p.name.lower() == product_name.lower()), None)
-        
+
         if not product:
             print(f"Product '{product_name}' not found")
             return 1
-        
+
         stats = history.get_stats(product.url, days=args.days)
         if not stats:
             print(f"No statistics available for '{product_name}'")
             return 0
-        
+
         print(f"\nPrice Statistics for: {product.name}")
         print(f"Period: Last {args.days} days")
         print("=" * 40)
@@ -381,7 +322,7 @@ def main() -> int:
         print(f"First Check:    {stats['first_check']}")
         print(f"Last Check:     {stats['last_check']}")
         return 0
-    
+
     if args.export_csv:
         history.export_to_csv(args.export_csv)
         print(f"History exported to: {args.export_csv}")
@@ -395,11 +336,11 @@ def main() -> int:
         password=os.getenv("SMTP_PASSWORD", ""),
         from_email=os.getenv("FROM_EMAIL", os.getenv("SMTP_USERNAME", "")),
         to_email=os.getenv("RECIPIENT_EMAIL", ""),
-        enable=_str_to_bool(os.getenv("ENABLE_EMAIL_NOTIFICATIONS", "false")),
-        use_starttls=_str_to_bool(os.getenv("SMTP_STARTTLS", "true"), True),
+        enable=str_to_bool(os.getenv("ENABLE_EMAIL_NOTIFICATIONS", "false")),
+        use_starttls=str_to_bool(os.getenv("SMTP_STARTTLS", "true"), True),
     )
     notifier = NotificationManager(smtp_cfg)
-    extractor = PriceExtractor(user_agent=args.user_agent, timeout=args.timeout, max_retries=args.max_retries)
+    service = build_check_service(args, history=history)
 
     # Cleanup old history records
     if args.history_retention_days > 0:
@@ -416,29 +357,47 @@ def main() -> int:
     # One-time run or scheduled?
     if not args.every:
         # One-time check
-        check_prices(args, smtp_cfg, notifier, extractor, history, store)
+        check_prices(args, smtp_cfg, notifier, service, history, store)
         return 0
 
-    # Parse interval
+    # Parse interval like '15m', '1h', '30s'
     interval = args.every.strip().lower()
-    if interval.endswith('m'):
-        minutes = int(interval[:-1])
-        schedule.every(minutes).minutes.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
-        logging.info(f"Scheduler started: checking every {minutes} minute(s)")
-    elif interval.endswith('h'):
-        hours = int(interval[:-1])
-        schedule.every(hours).hours.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
-        logging.info(f"Scheduler started: checking every {hours} hour(s)")
-    elif interval.endswith('s'):
-        seconds = int(interval[:-1])
-        schedule.every(seconds).seconds.do(lambda: check_prices(args, smtp_cfg, notifier, extractor, history, store))
-        logging.info(f"Scheduler started: checking every {seconds} second(s)")
-    else:
+    m = re.fullmatch(r"(\d+)([smh])", interval)
+    if not m:
         logging.error(f"Invalid interval format: {interval}. Use format like '15m', '1h', '30s'")
         return 1
+    amount = int(m.group(1))
+    unit = {"s": "seconds", "m": "minutes", "h": "hours"}[m.group(2)]
+    job = schedule.every(amount)
+    getattr(job, unit).do(lambda: check_prices(args, smtp_cfg, notifier, service, history, store))
+    logging.info(f"Scheduler started: checking every {amount} {unit[:-1]}(s)")
 
-    # Run once immediately, then on schedule
-    check_prices(args, smtp_cfg, notifier, extractor, history, store)
+    # Image warmup runs in the monitor process (not the web app) so the
+    # dashboard serves cached images without spawning background threads
+    # inside the Flask factory.  Throttled cross-process by ImageService.
+    warmup = None
+    if env_bool('ENABLE_IMAGE_WARMUP', True):
+        from sale_monitor.services.product_images import ImageService
+        image_service = ImageService(
+            user_agent=args.user_agent,
+            timeout=args.timeout,
+            data_dir=str(pathlib.Path(args.history_db).parent),
+        )
+
+        def warmup():
+            try:
+                image_service.warmup_once(store.get_all())
+            except Exception as e:
+                logging.error(f"Image warmup failed: {e}")
+
+        warmup_interval_min = int(os.getenv('IMAGE_WARMUP_INTERVAL_MIN', '360'))
+        schedule.every(max(1, warmup_interval_min)).minutes.do(warmup)
+
+    # Run once immediately, then on schedule (warmup after the first check
+    # so image prefetching never delays price monitoring at startup)
+    check_prices(args, smtp_cfg, notifier, service, history, store)
+    if warmup is not None:
+        warmup()
 
     try:
         while True:

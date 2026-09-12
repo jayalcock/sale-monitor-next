@@ -1,1 +1,1 @@
-# This file marks the routes directory as a Python package.
+"""Route blueprints for the Sale Monitor dashboard."""

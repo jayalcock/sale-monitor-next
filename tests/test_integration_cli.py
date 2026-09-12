@@ -1,8 +1,8 @@
 """Integration tests: CLI check_prices flow with mocked HTTP & real fs/db."""
-import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from sale_monitor.services.price_extractor import ExtractionResult
 from sale_monitor.storage.product_store import ProductStore
 
 HEADER = "name,url,target_price,discount_threshold,selector,enabled,notification_cooldown_hours\n"
@@ -39,22 +39,20 @@ def _smtp_cfg(enable=False):
 
 
 @patch(
-    "sale_monitor.services.price_extractor.PriceExtractor.extract_price_with_currency",
-    return_value=(59.99, "auto", "CAD"),
+    "sale_monitor.services.price_extractor.PriceExtractor.extract",
+    return_value=ExtractionResult(price=59.99, selector_source="auto", currency="CAD", currency_source="html"),
 )
 def test_check_prices_updates_state_and_history(_mock, tmp_path):
     args, store = _setup(tmp_path, 'Widget,https://example.com/w,50,10,#p,true,24\n')
 
-    from sale_monitor.cli.main import check_prices
-    from sale_monitor.services.price_extractor import PriceExtractor
+    from sale_monitor.cli.main import build_check_service, check_prices
     from sale_monitor.storage.json_state import load_state
     from sale_monitor.storage.price_history import PriceHistory
 
-    extractor = PriceExtractor.__new__(PriceExtractor)
-    extractor.last_identifiers = {}
     history = PriceHistory(str(tmp_path / "history.db"))
+    service = build_check_service(args, history=history)
 
-    check_prices(args, _smtp_cfg(), MagicMock(), extractor, history=history, store=store)
+    check_prices(args, _smtp_cfg(), MagicMock(), service, history=history, store=store)
 
     # State should have the product
     state = load_state(str(tmp_path / "state.json"))
@@ -67,30 +65,27 @@ def test_check_prices_updates_state_and_history(_mock, tmp_path):
 
 
 @patch(
-    "sale_monitor.services.price_extractor.PriceExtractor.extract_price_with_currency",
-    return_value=(None, None, None),
+    "sale_monitor.services.price_extractor.PriceExtractor.extract",
+    return_value=ExtractionResult(price=None),
 )
 def test_check_prices_skips_when_price_is_none(_mock, tmp_path):
     """When extraction returns None price, the product should NOT appear in state."""
     args, store = _setup(tmp_path, 'Broken,https://example.com/b,,,,true,24\n')
 
-    from sale_monitor.cli.main import check_prices
-    from sale_monitor.services.price_extractor import PriceExtractor
+    from sale_monitor.cli.main import build_check_service, check_prices
     from sale_monitor.storage.json_state import load_state
 
-    extractor = PriceExtractor.__new__(PriceExtractor)
-    extractor.last_identifiers = {}
-
-    # Pass history=None to avoid NOT NULL constraint on price column
-    check_prices(args, _smtp_cfg(), MagicMock(), extractor, history=None, store=store)
+    # Pass history=None so the failed check isn't recorded
+    service = build_check_service(args, history=None)
+    check_prices(args, _smtp_cfg(), MagicMock(), service, history=None, store=store)
 
     state = load_state(str(tmp_path / "state.json"))
     assert "https://example.com/b" not in state
 
 
 @patch(
-    "sale_monitor.services.price_extractor.PriceExtractor.extract_price_with_currency",
-    return_value=(25.00, "manual", "USD"),
+    "sale_monitor.services.price_extractor.PriceExtractor.extract",
+    return_value=ExtractionResult(price=25.00, selector_source="manual", currency="USD", currency_source="html"),
 )
 def test_check_prices_multiple_products(_mock, tmp_path):
     rows = (
@@ -100,14 +95,11 @@ def test_check_prices_multiple_products(_mock, tmp_path):
     )
     args, store = _setup(tmp_path, rows)
 
-    from sale_monitor.cli.main import check_prices
-    from sale_monitor.services.price_extractor import PriceExtractor
+    from sale_monitor.cli.main import build_check_service, check_prices
     from sale_monitor.storage.json_state import load_state
 
-    extractor = PriceExtractor.__new__(PriceExtractor)
-    extractor.last_identifiers = {}
-
-    check_prices(args, _smtp_cfg(), MagicMock(), extractor, store=store)
+    service = build_check_service(args, history=None)
+    check_prices(args, _smtp_cfg(), MagicMock(), service, store=store)
 
     state = load_state(str(tmp_path / "state.json"))
     # Two enabled products should be in state
@@ -115,3 +107,27 @@ def test_check_prices_multiple_products(_mock, tmp_path):
     assert "https://b.com/2" in state
     # Disabled product should NOT be there
     assert "https://c.com/3" not in state
+
+
+@patch(
+    "sale_monitor.services.price_extractor.PriceExtractor.extract",
+    return_value=ExtractionResult(price=42.00, selector_source="auto", currency="CAD", currency_source="html"),
+)
+def test_check_prices_preserves_concurrent_state_writes(_mock, tmp_path):
+    """Entries written by another process mid-cycle must survive the final save."""
+    args, store = _setup(tmp_path, 'Widget,https://example.com/w,,,#p,true,24\n')
+
+    from sale_monitor.cli.main import build_check_service, check_prices
+    from sale_monitor.storage.json_state import load_state, save_state
+
+    # Simulate a web write that happens after the CLI snapshot would be taken:
+    # pre-seed an unrelated entry the CLI doesn't know about.
+    save_state(args.state_file, {"https://other.example/x": {"current_price": 5.0}})
+
+    service = build_check_service(args, history=None)
+    check_prices(args, _smtp_cfg(), MagicMock(), service, store=store)
+
+    state = load_state(args.state_file)
+    assert "https://example.com/w" in state
+    # The unrelated entry written concurrently is still there
+    assert state["https://other.example/x"]["current_price"] == 5.0

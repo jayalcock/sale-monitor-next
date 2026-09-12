@@ -18,7 +18,7 @@ def setup_logging(fmt: str | None = None, level: str | None = None) -> None:
         fmt:   "json", "text", or None (auto-detect from LOG_FORMAT env / TTY).
         level: e.g. "DEBUG", "INFO". Falls back to LOG_LEVEL env, then INFO.
     """
-    log_level = getattr(logging, (level or os.getenv("LOG_LEVEL", "INFO")).upper(), logging.INFO)
+    log_level = getattr(logging, str(level or os.getenv("LOG_LEVEL") or "INFO").upper(), logging.INFO)
 
     fmt = fmt or os.getenv("LOG_FORMAT", "").lower() or None
     if fmt is None:
@@ -32,6 +32,7 @@ def setup_logging(fmt: str | None = None, level: str | None = None) -> None:
 
     handler = logging.StreamHandler(sys.stderr)
 
+    formatter: logging.Formatter
     if fmt == "json":
         try:
             from pythonjsonlogger import jsonlogger

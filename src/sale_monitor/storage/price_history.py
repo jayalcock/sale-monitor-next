@@ -1,10 +1,20 @@
 """
 SQLite-based storage for historical price data.
 """
+import csv
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+
+def _cutoff_iso(days: int) -> str:
+    """UTC cutoff timestamp for "last N days" windows.
+
+    Stored timestamps are UTC ISO strings with offset, so cutoffs must be
+    produced the same way for lexicographic comparison to be correct.
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
 class PriceHistory:
@@ -82,7 +92,7 @@ class PriceHistory:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     product_url TEXT NOT NULL,
                     product_name TEXT NOT NULL,
-                    price REAL NOT NULL,
+                    price REAL,
                     timestamp TEXT NOT NULL,
                     check_status TEXT DEFAULT 'success',
                     currency TEXT DEFAULT 'CAD',
@@ -158,10 +168,10 @@ class PriceHistory:
         run_migrations(self.db_path)
 
     def record_price(
-        self, 
-        product_url: str, 
-        product_name: str, 
-        price: float, 
+        self,
+        product_url: str,
+        product_name: str,
+        price: Optional[float],
         timestamp: Optional[str] = None,
         status: str = "success",
         currency: str = "CAD",
@@ -181,16 +191,16 @@ class PriceHistory:
         # provided value (which captures the exchange rate at check time).
         if cur == "CAD" and price_cad is None:
             price_cad = price
-        
+
         def _do_insert():
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     """
-                    INSERT INTO price_history 
+                    INSERT INTO price_history
                     (product_url, product_name, price, timestamp, check_status, currency, price_cad)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (product_url, product_name, price if price is not None else 0, timestamp, status, cur, price_cad)
+                    (product_url, product_name, price, timestamp, status, cur, price_cad)
                 )
                 conn.commit()
 
@@ -222,13 +232,12 @@ class PriceHistory:
                 FROM price_history 
                 WHERE product_url = ?
             """
-            params = [product_url]
-            
+            params: list = [product_url]
+
             if days is not None:
-                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
                 query += " AND timestamp >= ?"
-                params.append(cutoff)
-            
+                params.append(_cutoff_iso(days))
+
             query += " ORDER BY timestamp DESC"
             
             if limit is not None:
@@ -285,9 +294,8 @@ class PriceHistory:
             params: list = []
 
             if days is not None:
-                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
                 query += " WHERE timestamp >= ?"
-                params.append(cutoff)
+                params.append(_cutoff_iso(days))
 
             query += " ORDER BY product_url, timestamp DESC"
 
@@ -317,9 +325,8 @@ class PriceHistory:
             params: list = []
 
             if days is not None:
-                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
                 conditions.append("timestamp >= ?")
-                params.append(cutoff)
+                params.append(_cutoff_iso(days))
 
             where = "WHERE " + " AND ".join(conditions)
 
@@ -381,13 +388,11 @@ class PriceHistory:
         """Delete records older than retention_days."""
         if retention_days <= 0:
             return  # 0 means keep forever
-        
-        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
-        
+
         with sqlite3.connect(self.db_path) as conn:
             result = conn.execute(
                 "DELETE FROM price_history WHERE timestamp < ?",
-                (cutoff,)
+                (_cutoff_iso(retention_days),)
             )
             deleted = result.rowcount
             conn.commit()
@@ -487,18 +492,49 @@ class PriceHistory:
         if not product_urls:
             return {}
 
-        result = {}
         with sqlite3.connect(self.db_path) as conn:
-            for url in product_urls:
-                rows = conn.execute(
-                    "SELECT check_status FROM price_history "
-                    "WHERE product_url = ? ORDER BY timestamp DESC LIMIT ?",
-                    (url, n),
-                ).fetchall()
-                result[url] = (
-                    len(rows) >= n and all(r[0] == "success" for r in rows)
-                )
-        return result
+            placeholders = ",".join("?" for _ in product_urls)
+            rows = conn.execute(
+                f"""
+                SELECT product_url, check_status FROM (
+                    SELECT product_url, check_status,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY product_url ORDER BY timestamp DESC
+                           ) AS rn
+                    FROM price_history
+                    WHERE product_url IN ({placeholders})
+                ) WHERE rn <= ?
+                """,
+                list(product_urls) + [n],
+            ).fetchall()
+
+        counts: dict = {}
+        successes: dict = {}
+        for url, status in rows:
+            counts[url] = counts.get(url, 0) + 1
+            successes[url] = successes.get(url, 0) + (1 if status == "success" else 0)
+        return {
+            url: counts.get(url, 0) >= n and successes.get(url, 0) == counts.get(url, 0)
+            for url in product_urls
+        }
+
+    def get_consecutive_failures(self, product_url: str, lookback: int = 50) -> int:
+        """Number of most-recent consecutive non-success checks for a product.
+
+        Returns 0 if the latest check succeeded (or there is no history).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT check_status FROM price_history "
+                "WHERE product_url = ? ORDER BY timestamp DESC LIMIT ?",
+                (product_url, lookback),
+            ).fetchall()
+        streak = 0
+        for (status,) in rows:
+            if status == "success":
+                break
+            streak += 1
+        return streak
 
     def get_max_prices_batch(self, product_urls: list, days: Optional[int] = None) -> dict:
         """Get max successful price per product in a single query.
@@ -520,9 +556,8 @@ class PriceHistory:
             params: list = list(product_urls)
 
             if days is not None:
-                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
                 query += " AND timestamp >= ?"
-                params.append(cutoff)
+                params.append(_cutoff_iso(days))
 
             query += " GROUP BY product_url"
             return {row[0]: row[1] for row in conn.execute(query, params) if row[1] is not None}
@@ -541,8 +576,8 @@ class PriceHistory:
             """
             params: list = [product_url]
 
-            if days is not None:
-                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            cutoff = _cutoff_iso(days) if days is not None else None
+            if cutoff is not None:
                 query += " AND timestamp >= ?"
                 params.append(cutoff)
 
@@ -558,7 +593,7 @@ class PriceHistory:
                 WHERE product_url = ? AND check_status = 'success'
             """
             cur_params: list = [product_url]
-            if days is not None:
+            if cutoff is not None:
                 cur_query += " AND timestamp >= ?"
                 cur_params.append(cutoff)
             cur_query += " ORDER BY timestamp DESC LIMIT 1"
@@ -582,37 +617,11 @@ class PriceHistory:
 
     def export_to_csv(self, output_path: str, product_url: Optional[str] = None):
         """Export history to CSV file."""
-        import csv
-        
-        with sqlite3.connect(self.db_path) as conn:
-            if product_url:
-                cursor = conn.execute(
-                    """
-                    SELECT product_name, product_url, price, currency, price_cad, timestamp, check_status 
-                    FROM price_history 
-                    WHERE product_url = ?
-                    ORDER BY timestamp DESC
-                    """,
-                    (product_url,)
-                )
-            else:
-                cursor = conn.execute(
-                    """
-                    SELECT product_name, product_url, price, currency, price_cad, timestamp, check_status 
-                    FROM price_history 
-                    ORDER BY timestamp DESC
-                    """
-                )
-            
-            with open(output_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['product_name', 'product_url', 'price', 'currency', 'price_cad', 'timestamp', 'status'])
-                writer.writerows(cursor)
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            self.export_to_csv_stream(f, product_url=product_url)
 
     def export_to_csv_stream(self, output_stream, product_url: Optional[str] = None):
         """Export history to a CSV stream (file-like object)."""
-        import csv
-        
         with sqlite3.connect(self.db_path) as conn:
             if product_url:
                 cursor = conn.execute(
