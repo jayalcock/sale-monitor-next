@@ -3,11 +3,14 @@
 Replaces CSV as the source of truth for product definitions.
 CSV is retained only as an import/export format.
 """
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from sale_monitor.domain.models import Product
+
+logger = logging.getLogger(__name__)
 
 
 class ProductStore:
@@ -209,13 +212,25 @@ class ProductStore:
         return self.import_from_csv(csv_path)
 
     def import_from_csv(self, csv_path: str) -> int:
-        """Import products from a CSV file, skipping URLs that already exist."""
+        """Import products from a CSV file, skipping URLs that already exist.
+
+        Rows that fail validation (bad URL scheme, unknown alert rules, …)
+        are skipped with a warning instead of importing silently broken
+        products.
+        """
+        from sale_monitor.domain.validation import (ProductValidationError,
+                                                    validate_product)
         from sale_monitor.storage.csv_products import read_products
 
         products = read_products(csv_path)
         existing_urls = self.urls()
         added = 0
         for p in products:
+            try:
+                validate_product(p)
+            except ProductValidationError as e:
+                logger.warning("Skipping invalid CSV row %r: %s", p.name or p.url, e)
+                continue
             if p.url in existing_urls:
                 continue
             self.add(p)

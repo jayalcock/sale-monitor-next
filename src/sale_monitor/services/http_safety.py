@@ -18,6 +18,44 @@ logger = logging.getLogger(__name__)
 
 MAX_REDIRECTS = 5
 
+_FORBIDDEN_HOSTS = {"localhost", "localhost.localdomain"}
+
+
+def is_obviously_non_public_url(url: str) -> bool:
+    """Syntax-only screen (no DNS): True for non-http(s) URLs, local
+    hostnames, and IP literals in private/loopback/reserved ranges.
+
+    Cheap enough to run at product-add time, where a resolving check
+    would make adds network-dependent; ``safe_get`` still performs the
+    full resolving check on every fetch and redirect hop.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return True
+    if parsed.scheme not in ("http", "https"):
+        return True
+    hostname = (parsed.hostname or "").strip().rstrip(".")
+    if not hostname:
+        return True
+    if hostname.lower() in _FORBIDDEN_HOSTS:
+        return True
+    # Single-label hostnames (no dot) are intranet names, not public sites
+    if "." not in hostname:
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False  # a resolvable name; safe_get re-checks what it resolves to
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
 
 def is_public_url(url: str) -> bool:
     """Allow only http(s) URLs whose host resolves exclusively to public IPs."""
@@ -31,8 +69,7 @@ def is_public_url(url: str) -> bool:
     if not hostname:
         return False
     # Disallow obvious local names
-    forbidden_hosts = {"localhost", "localhost.localdomain"}
-    if hostname in forbidden_hosts:
+    if hostname in _FORBIDDEN_HOSTS:
         return False
     try:
         infos = socket.getaddrinfo(hostname, None)

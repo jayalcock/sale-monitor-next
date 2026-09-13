@@ -12,39 +12,40 @@ import requests
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from sale_monitor.domain.models import Product
-from sale_monitor.services.http_safety import safe_get
+from sale_monitor.domain.validation import (ProductValidationError,
+                                            validate_product_payload)
+from sale_monitor.services.http_safety import (is_obviously_non_public_url,
+                                               safe_get)
 from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.storage.config_store import get_base_currency
 from sale_monitor.storage.json_state import delete_state_entry, mutate_state
 from sale_monitor.utils import utcnow_iso
 from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
 from sale_monitor.web.extensions import rate_limit
-from sale_monitor.web.helpers import (
-    config_file,
-    get_check_service,
-    get_ex_service,
-    get_history,
-    get_product_store,
-    get_state_cache,
-    invalidate_alerts_cache,
-    paginate,
-    safe_error,
-    state_file,
-)
+from sale_monitor.web.helpers import (config_file, get_check_service,
+                                      get_ex_service, get_history,
+                                      get_product_store, get_state_cache,
+                                      invalidate_alerts_cache, paginate,
+                                      safe_error, state_file)
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('products', __name__)
 
 
-def _parse_csv_list(val, current=None):
-    if val is None:
-        return current if current is not None else []
-    if not val:
-        return []
-    if isinstance(val, list):
-        return [s.strip() for s in val if isinstance(s, str) and s.strip()]
-    return [s.strip() for s in str(val).split(',') if s.strip()]
+def _validate_payload(data, current=None):
+    """Shared payload validation plus the web-only public-host screen.
+
+    Products added through the web API are untrusted input, so URLs that
+    plainly target internal hosts are refused up front (fetch-time
+    ``safe_get`` still re-checks what each hostname resolves to).
+    """
+    fields = validate_product_payload(data or {}, current=current)
+    for field_name in ('url', 'scrape_url'):
+        url = fields.get(field_name)
+        if url and is_obviously_non_public_url(url):
+            raise ProductValidationError(f'{field_name} must point to a public host')
+    return fields
 
 
 @bp.route('/api/products')
@@ -97,6 +98,7 @@ def api_products():
                 'current_price': current_price,
                 'price_in_base': price_in_base,
                 'currency': currency,
+                'configured_currency': getattr(p, 'currency', None) or 'CAD',
                 'base_currency': base_currency,
                 'currency_source': state_data.get('currency_source', 'configured' if getattr(p, 'currency', None) else 'default'),
                 'target_price': p.target_price,
@@ -287,7 +289,8 @@ def api_auto_detect_all():
         extractor = PriceExtractor(
             user_agent=current_app.config['USER_AGENT'],
             timeout=current_app.config['TIMEOUT'],
-            max_retries=current_app.config['MAX_RETRIES']
+            max_retries=current_app.config['MAX_RETRIES'],
+            require_public_urls=True,
         )
 
         successful = 0
@@ -393,77 +396,20 @@ def api_fetch_product_info():
 def api_add_product():
     """Add a new product."""
     try:
-        data = request.get_json()
-
-        # Validate required fields (selector is now optional)
-        required = ['name', 'url']
-        for field in required:
-            if not data.get(field):
-                return jsonify({'error': f'{field} is required'}), 400
-
-        # Validate URL scheme
-        parsed_url = urlparse(data['url'])
-        if parsed_url.scheme not in ('http', 'https'):
-            return jsonify({'error': 'URL must use http or https'}), 400
-
-        # Validate name length
-        if len(data['name']) > 500:
-            return jsonify({'error': 'Name must be 500 characters or fewer'}), 400
-
-        # Parse and validate optional numeric fields
-        def _parse_float(val, field_name):
-            if val in (None, ''):
-                return None
-            try:
-                result = float(val)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f'{field_name} must be a valid number') from exc
-            if result < 0:
-                raise ValueError(f'{field_name} must not be negative')
-            return result
-
-        def _parse_int(val, field_name, default=None):
-            if val in (None, ''):
-                return default
-            try:
-                parsed = int(val)
-            except (TypeError, ValueError) as e:
-                raise ValueError(f'{field_name} must be a valid positive integer') from e
-            if parsed < 0:
-                raise ValueError(f'{field_name} must be a positive number')
-            if parsed > 8760:
-                raise ValueError(f'{field_name} must be 8760 or fewer')
-            return parsed
-
         try:
-            target_price = _parse_float(data.get('target_price'), 'target_price')
-            discount_threshold = _parse_float(data.get('discount_threshold'), 'discount_threshold')
-            cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), 'notification_cooldown_hours', default=24)
-        except ValueError as ve:
+            fields = _validate_payload(request.get_json())
+        except ProductValidationError as ve:
             return jsonify({'error': str(ve)}), 400
 
-        # Create product
-        new_product = Product(
-            name=data['name'],
-            url=data['url'],
-            target_price=target_price,
-            discount_threshold=discount_threshold,
-            selector=data.get('selector', ''),  # Default to empty string if not provided
-            enabled=data.get('enabled', True),
-            notification_cooldown_hours=cooldown_hours,
-            scrape_url=(data.get('scrape_url') or '').strip() or None,
-            group=data.get('group', '').strip() or None,
-            tags=_parse_csv_list(data.get('tags')),
-            alert_rules=_parse_csv_list(data.get('alert_rules')),
-            notification_channels=_parse_csv_list(data.get('notification_channels')),
-        )
+        new_product = Product(**fields)
 
-        # Check for duplicate URL and add
+        # The UNIQUE(url) constraint is the duplicate check: a get-then-add
+        # pre-check would race with concurrent adds.
         product_store = get_product_store()
-        if product_store.get_by_url(new_product.url):
+        try:
+            product_store.add(new_product)
+        except sqlite3.IntegrityError:
             return jsonify({'error': 'Product with this URL already exists'}), 400
-
-        product_store.add(new_product)
         invalidate_alerts_cache()
 
         # Auto-check price synchronously so the UI shows it immediately
@@ -485,6 +431,7 @@ def api_add_product():
             'name': new_product.name,
             'url': new_product.url,
             'enabled': new_product.enabled,
+            'currency': new_product.currency,
             'notification_cooldown_hours': new_product.notification_cooldown_hours
         }}
         if price_result:
@@ -509,47 +456,11 @@ def api_update_product():
         if not p:
             return jsonify({'error': 'Product not found'}), 404
 
-        # Safe parsing helpers with validation
-        def _parse_float(val, current, field_name):
-            if val in (None, ''):
-                return current
-            try:
-                return float(val)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f'{field_name} must be a valid number') from exc
-
-        def _parse_int(val, current, field_name):
-            if val in (None, ''):
-                return current
-            try:
-                parsed = int(val)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f'{field_name} must be a valid positive integer') from exc
-            if parsed < 0:
-                raise ValueError(f'{field_name} must be a positive number')
-            return parsed
-
         try:
-            target_price = _parse_float(data.get('target_price'), p.target_price, 'target_price')
-            discount_threshold = _parse_float(data.get('discount_threshold'), p.discount_threshold, 'discount_threshold')
-            cooldown_hours = _parse_int(data.get('notification_cooldown_hours'), p.notification_cooldown_hours, 'notification_cooldown_hours')
-        except ValueError as ve:
+            fields = _validate_payload(data, current=p)
+        except ProductValidationError as ve:
             return jsonify({'error': str(ve)}), 400
 
-        raw_scrape_url = data.get('scrape_url', getattr(p, 'scrape_url', None))
-        fields = {
-            'name': data.get('name', p.name),
-            'target_price': target_price,
-            'discount_threshold': discount_threshold,
-            'selector': data.get('selector', p.selector),
-            'scrape_url': (raw_scrape_url.strip() or None) if isinstance(raw_scrape_url, str) else raw_scrape_url,
-            'enabled': data.get('enabled', p.enabled),
-            'notification_cooldown_hours': cooldown_hours,
-            'group': data.get('group', p.group).strip() if data.get('group') is not None else p.group,
-            'tags': _parse_csv_list(data.get('tags'), getattr(p, 'tags', [])),
-            'alert_rules': _parse_csv_list(data.get('alert_rules'), getattr(p, 'alert_rules', [])),
-            'notification_channels': _parse_csv_list(data.get('notification_channels'), getattr(p, 'notification_channels', [])),
-        }
         product_store.update(url, **fields)
         invalidate_alerts_cache()
 
@@ -562,6 +473,7 @@ def api_update_product():
             'target_price': updated.target_price,
             'discount_threshold': updated.discount_threshold,
             'selector': updated.selector,
+            'currency': updated.currency,
             'group': updated.group
         }})
     except (OSError, ValueError) as e:
@@ -588,50 +500,27 @@ def api_bulk_import():
         errors = []
 
         for idx, item in enumerate(items):
-            row_label = item.get('name') or f'row {idx + 1}'
-            name = (item.get('name') or '').strip()
-            url = (item.get('url') or '').strip()
-
-            if not name or not url:
-                errors.append(f'{row_label}: name and url are required')
+            if not isinstance(item, dict):
+                errors.append(f'row {idx + 1}: must be an object')
+                continue
+            row_label = (str(item.get('name') or '').strip()) or f'row {idx + 1}'
+            try:
+                fields = _validate_payload(item)
+            except ProductValidationError as ve:
+                errors.append(f'{row_label}: {ve}')
                 continue
 
-            parsed_url = urlparse(url)
-            if parsed_url.scheme not in ('http', 'https'):
-                errors.append(f'{row_label}: URL must use http or https')
-                continue
-
-            if len(name) > 500:
-                errors.append(f'{row_label}: name too long')
-                continue
-
-            if url in existing_urls:
-                skipped.append(name)
+            if fields['url'] in existing_urls:
+                skipped.append(fields['name'])
                 continue
 
             try:
-                tp = float(item['target_price']) if item.get('target_price') not in (None, '') else None
-                dt = float(item['discount_threshold']) if item.get('discount_threshold') not in (None, '') else None
-            except (TypeError, ValueError):
-                errors.append(f'{row_label}: invalid numeric value')
+                product_store.add(Product(**fields))
+            except sqlite3.IntegrityError:
+                skipped.append(fields['name'])
                 continue
-
-            new_product = Product(
-                name=name,
-                url=url,
-                target_price=tp,
-                discount_threshold=dt,
-                selector=item.get('selector', ''),
-                enabled=item.get('enabled', True),
-                notification_cooldown_hours=int(item.get('notification_cooldown_hours', 24)),
-                group=(item.get('group') or '').strip() or None,
-                tags=_parse_csv_list(item.get('tags')),
-                alert_rules=_parse_csv_list(item.get('alert_rules')),
-                notification_channels=_parse_csv_list(item.get('notification_channels')),
-            )
-            product_store.add(new_product)
-            existing_urls.add(url)
-            added.append(name)
+            existing_urls.add(fields['url'])
+            added.append(fields['name'])
 
         invalidate_alerts_cache()
         return jsonify({

@@ -106,9 +106,15 @@
                         <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="selector" placeholder="e.g., .price, #product-price">
                         <p class="text-xs text-gray-400 mt-1">Leave empty to use automatic price detection. Provide a CSS selector for more control.</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-200">Target Price</label>
-                        <input type="text" inputmode="decimal" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="target_price" placeholder="e.g., 99.99">
+                    <div class="flex gap-3">
+                        <div class="flex-1">
+                            <label class="block text-sm font-medium text-gray-200">Target Price</label>
+                            <input type="text" inputmode="decimal" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="target_price" placeholder="e.g., 99.99">
+                        </div>
+                        <div class="w-28">
+                            <label class="block text-sm font-medium text-gray-200">Currency</label>
+                            <input type="text" maxlength="3" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2 uppercase" name="currency" id="add-currency" placeholder="CAD">
+                        </div>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-200">Discount Threshold (%)</label>
@@ -189,9 +195,15 @@
                         <input type="text" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="selector" id="edit-selector" placeholder="e.g., .price, #product-price">
                         <p class="text-xs text-gray-400 mt-1">Leave empty to use automatic price detection. Provide a CSS selector for more control.</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-200">Target Price</label>
-                        <input type="text" inputmode="decimal" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="target_price" id="edit-target-price" placeholder="e.g., 99.99">
+                    <div class="flex gap-3">
+                        <div class="flex-1">
+                            <label class="block text-sm font-medium text-gray-200">Target Price</label>
+                            <input type="text" inputmode="decimal" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2" name="target_price" id="edit-target-price" placeholder="e.g., 99.99">
+                        </div>
+                        <div class="w-28">
+                            <label class="block text-sm font-medium text-gray-200">Currency</label>
+                            <input type="text" maxlength="3" class="mt-1 w-full bg-gray-700 border border-gray-600 rounded-md text-white px-3 py-2 uppercase" name="currency" id="edit-currency" placeholder="CAD">
+                        </div>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-200">Discount Threshold (%)</label>
@@ -637,6 +649,7 @@ function addProduct() {
         selector: formData.get('selector') || '',  // Allow empty selector
         target_price: formData.get('target_price') || null,
         discount_threshold: formData.get('discount_threshold') || null,
+        currency: (formData.get('currency') || '').trim().toUpperCase() || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours') || 24,
         enabled: formData.get('enabled') === 'on',
         group: formData.get('group') || '',
@@ -685,6 +698,9 @@ function editProduct(product) {
     document.getElementById('edit-target-price').value = product.target_price || '';
     document.getElementById('edit-discount').value = product.discount_threshold || '';
     document.getElementById('edit-cooldown').value = product.notification_cooldown_hours;
+    // configured_currency is the product's stored setting; `currency` is the
+    // page-detected one and must not be written back as configuration.
+    document.getElementById('edit-currency').value = product.configured_currency || 'CAD';
     document.getElementById('edit-group').value = product.group || '';
     document.getElementById('edit-tags').value = (product.tags || []).join(', ');
     
@@ -730,6 +746,7 @@ function updateProduct() {
         selector: formData.get('selector') || '',  // Allow empty selector
         target_price: formData.get('target_price') || null,
         discount_threshold: formData.get('discount_threshold') || null,
+        currency: (formData.get('currency') || '').trim().toUpperCase() || null,
         notification_cooldown_hours: formData.get('notification_cooldown_hours'),
         enabled: formData.get('enabled') === 'on',
         group: formData.get('group') || '',
