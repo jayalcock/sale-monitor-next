@@ -3,16 +3,14 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from sale_monitor.storage.config_store import (
-    get_base_currency,
-    load_config,
-    load_notification_config,
-    save_config,
-    save_notification_config,
-)
+from sale_monitor.storage.config_store import (get_base_currency, load_config,
+                                               load_notification_config,
+                                               save_config,
+                                               save_notification_config)
 from sale_monitor.web.auth import require_api_key, require_api_key_for_reads
 from sale_monitor.web.extensions import rate_limit
-from sale_monitor.web.helpers import config_file, get_ex_service, safe_error
+from sale_monitor.web.helpers import (config_file, currencies_in_use,
+                                      get_ex_service, safe_error)
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +92,8 @@ def api_test_notification():
             smtp = cfg.get('smtp', {})
             if not smtp.get('server') or not smtp.get('to_email'):
                 return jsonify({'error': 'SMTP not configured'}), 400
-            from sale_monitor.services.notifications import NotificationManager, SmtpConfig
+            from sale_monitor.services.notifications import (
+                NotificationManager, SmtpConfig)
             smtp_cfg = SmtpConfig(
                 server=smtp['server'], port=int(smtp.get('port', 587)),
                 username=smtp.get('username', ''), password=smtp.get('password', ''),
@@ -118,7 +117,8 @@ def api_test_notification():
                     break
             if not target_wh or not target_wh.get('url'):
                 return jsonify({'error': f'Webhook "{channel}" not found or has no URL'}), 400
-            from sale_monitor.services.webhooks import DiscordWebhookNotifier, SlackWebhookNotifier
+            from sale_monitor.services.webhooks import (DiscordWebhookNotifier,
+                                                        SlackWebhookNotifier)
             wh_type = target_wh.get('type', '').lower()
             if wh_type == 'discord':
                 notifier = DiscordWebhookNotifier(name=channel, url=target_wh['url'])
@@ -138,16 +138,31 @@ def api_test_notification():
 @bp.route('/api/rates/refresh', methods=['POST'])
 @require_api_key
 def api_refresh_rates():
-    """Force-refresh exchange rates from the API."""
+    """Force-refresh exchange rates from the API.
+
+    Fetches fresh rates for every currency conversions depend on and
+    reports genuine failure: the old implementation went through
+    ``get_rate``, whose stale-cache fallback made a dead API look like a
+    successful refresh.
+    """
     try:
         ex_service = get_ex_service()
         base_currency = get_base_currency(config_file())
+        bases = currencies_in_use(base_currency)
+        if not bases:
+            # Nothing to convert; still refresh one common base as a probe
+            bases = {'USD' if base_currency != 'USD' else 'CAD'}
         ex_service.clear_cache()
-        rate = ex_service.get_rate('USD', base_currency)
-        if rate is not None:
-            return jsonify({'success': True, 'sample_rate': f'USD/{base_currency} = {rate}'})
-        else:
-            return jsonify({'error': 'Failed to fetch rates from API'}), 502
+        results = ex_service.refresh(bases)
+        failed = sorted(b for b, ok in results.items() if not ok)
+        if failed:
+            return jsonify({'error': f'Failed to fetch rates for: {", ".join(failed)}'}), 502
+        sample_base = sorted(results)[0]
+        rate = ex_service.get_rate(sample_base, base_currency)
+        return jsonify({
+            'success': True,
+            'refreshed': sorted(results),
+            'sample_rate': f'{sample_base}/{base_currency} = {rate}',
+        })
     except Exception as e:  # noqa: BLE001
-        logger.error("Rate refresh failed: %s", e)
-        return jsonify({'error': str(e)}), 500
+        return safe_error(e, 'Rate refresh failed')
