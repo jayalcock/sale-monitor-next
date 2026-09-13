@@ -679,23 +679,49 @@ class PriceHistory:
     def cache_exchange_rate(self, base_currency: str, target_currency: str, rate: float):
         """Cache an exchange rate with current timestamp."""
         timestamp = datetime.now(timezone.utc).isoformat()
-        
+
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute(
                 """
-                INSERT OR REPLACE INTO exchange_rates 
+                INSERT OR REPLACE INTO exchange_rates
                 (base_currency, target_currency, rate, timestamp)
                 VALUES (?, ?, ?, ?)
                 """,
                 (base_currency, target_currency, rate, timestamp)
             )
             conn.commit()
-    
+
+    def cache_exchange_rates(self, base_currency: str, rates: dict):
+        """Cache a full set of rates for one base in a single transaction.
+
+        A refresh writes 150+ pairs; one connection/commit instead of one
+        per pair keeps it fast and avoids repeated lock contention with the
+        CLI writer.
+        """
+        timestamp = datetime.now(timezone.utc).isoformat()
+        rows = [
+            (base_currency, target, float(rate), timestamp)
+            for target, rate in rates.items()
+        ]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO exchange_rates
+                (base_currency, target_currency, rate, timestamp)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+
     def get_cached_rate(self, base_currency: str, target_currency: str, max_age_hours: int = 24) -> Optional[float]:
         """Get cached exchange rate if it's fresh enough."""
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
-        
+
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA busy_timeout=5000")
             cursor = conn.execute(
                 """
                 SELECT rate FROM exchange_rates

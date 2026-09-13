@@ -7,13 +7,19 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
 
+from sale_monitor.storage.config_store import get_base_currency
 from sale_monitor.utils import parse_iso
 from sale_monitor.web.auth import require_api_key_for_reads
-from sale_monitor.web.helpers import get_product_store, get_state_cache
+from sale_monitor.web.helpers import (config_file, currencies_in_use,
+                                      get_product_store, get_state_cache)
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('health', __name__)
+
+# Persistent rate cache TTL is 24h; a couple hours of slack before we call
+# the rates stale (a healthy deployment refreshes well within this).
+RATE_STALE_AFTER_SECONDS = 26 * 3600
 
 
 @bp.route('/api/health')
@@ -76,20 +82,38 @@ def api_health_detailed():
         except (OSError, ValueError):
             pass
 
-        # Exchange rate cache age
+        # Exchange rate cache freshness for the currencies actually in use.
+        # A global MAX(timestamp) can hide a stale base (USD refreshing while
+        # EUR sits frozen), so report the oldest in-use base instead.
         exchange_rate_age = None
+        rates_in_use: list = []
+        rates_stale = False
         try:
-            with sqlite3.connect(current_app.config['HISTORY_DB']) as conn:
-                er_row = conn.execute(
-                    "SELECT MAX(timestamp) FROM exchange_rates"
-                ).fetchone()
-                if er_row and er_row[0]:
-                    cached_at = parse_iso(er_row[0])
-                    if cached_at is not None:
-                        exchange_rate_age = round(
-                            (datetime.now(timezone.utc) - cached_at).total_seconds()
-                        )
-        except (sqlite3.Error, ValueError, TypeError):
+            base_currency = get_base_currency(config_file())
+            in_use = currencies_in_use(base_currency)
+            rates_in_use = sorted(in_use)
+            if in_use:
+                placeholders = ','.join('?' * len(in_use))
+                with sqlite3.connect(current_app.config['HISTORY_DB']) as conn:
+                    rate_rows = conn.execute(
+                        f"SELECT base_currency, MAX(timestamp) FROM exchange_rates "
+                        f"WHERE base_currency IN ({placeholders}) GROUP BY base_currency",
+                        tuple(in_use),
+                    ).fetchall()
+                newest = {r[0]: r[1] for r in rate_rows}
+                now = datetime.now(timezone.utc)
+                ages = []
+                for cur in in_use:
+                    cached_at = parse_iso(newest[cur]) if newest.get(cur) else None
+                    if cached_at is None:
+                        rates_stale = True  # in use but never fetched
+                        continue
+                    ages.append((now - cached_at).total_seconds())
+                if ages:
+                    exchange_rate_age = round(max(ages))
+                    if exchange_rate_age > RATE_STALE_AFTER_SECONDS:
+                        rates_stale = True
+        except (sqlite3.Error, OSError, ValueError, TypeError):
             pass
 
         uptime_seconds = round(time.time() - current_app.config['_APP_START_TIME'])
@@ -103,6 +127,8 @@ def api_health_detailed():
             'enabled_count': enabled_count,
             'last_check': last_check,
             'exchange_rate_cache_age_seconds': exchange_rate_age,
+            'exchange_rates_in_use': rates_in_use,
+            'exchange_rates_stale': rates_stale,
             'uptime_seconds': uptime_seconds,
         })
     except (sqlite3.Error, OSError, ValueError) as e:

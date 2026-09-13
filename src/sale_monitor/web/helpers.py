@@ -147,6 +147,24 @@ def invalidate_alerts_cache():
     current_app.config['_ALERTS_CACHE'] = {'mtime': None, 'data': []}
 
 
+def currencies_in_use(base_currency: str) -> set:
+    """Currencies (≠ base) that current conversions depend on.
+
+    For each enabled product: the page-detected currency from state when
+    available, else the configured one — the same preference order the
+    conversion pipeline uses.
+    """
+    state = get_state_cache().get()
+    in_use = set()
+    for p in get_product_store().get_enabled():
+        rec = state.get(p.url)
+        detected = rec.get('currency') if isinstance(rec, dict) else None
+        cur = (detected or p.currency or 'CAD').upper()
+        if cur != base_currency:
+            in_use.add(cur)
+    return in_use
+
+
 # ── request helpers ────────────────────────────────────────────────────────
 
 def safe_error(e, msg='Internal server error'):

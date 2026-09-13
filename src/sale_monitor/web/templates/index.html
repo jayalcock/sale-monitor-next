@@ -2030,13 +2030,28 @@ function loadHealthWidget() {
             const rt = document.getElementById('hw-rates');
             const rb = document.getElementById('hw-rates-refresh');
             if (rt) {
-                if (data.exchange_rate_cache_age_seconds != null) {
-                    const mins = Math.round(data.exchange_rate_cache_age_seconds / 60);
-                    rt.textContent = mins < 120 ? 'Fresh' : `Stale (${Math.round(mins / 60)}h old)`;
-                    rt.className = mins < 120 ? 'text-white font-medium' : 'text-yellow-400 font-medium';
-                    if (rb) rb.classList.toggle('hidden', mins < 120);
-                } else {
+                const age = data.exchange_rate_cache_age_seconds;
+                const inUse = (data.exchange_rates_in_use || []).length > 0;
+                // Server-side flag; fall back to 26h (cache TTL 24h + slack) for older backends
+                const stale = data.exchange_rates_stale != null
+                    ? data.exchange_rates_stale
+                    : (age != null && age > 26 * 3600);
+                if (!inUse && age == null) {
                     rt.textContent = 'N/A';
+                    rt.className = 'text-white font-medium';
+                    if (rb) rb.classList.add('hidden');
+                } else if (stale) {
+                    let label = 'never fetched';
+                    if (age != null) {
+                        const hours = Math.round(age / 3600);
+                        label = hours < 48 ? `${hours}h old` : `${Math.round(hours / 24)}d old`;
+                    }
+                    rt.textContent = `Stale (${label})`;
+                    rt.className = 'text-yellow-400 font-medium';
+                    if (rb) rb.classList.remove('hidden');
+                } else {
+                    rt.textContent = 'Fresh';
+                    rt.className = 'text-white font-medium';
                     if (rb) rb.classList.add('hidden');
                 }
             }
