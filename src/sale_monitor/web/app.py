@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request
 
 from sale_monitor.services.exchange_rates import ExchangeRateService
 from sale_monitor.services.price_check import PriceCheckService
+from sale_monitor.services.price_extractor import PriceExtractor
 from sale_monitor.services.product_images import ImageService
 from sale_monitor.storage.config_store import get_base_currency
 from sale_monitor.storage.price_history import PriceHistory
@@ -67,6 +68,15 @@ def create_app():
         history=_shared_history,
         ex_service=_shared_ex_service,
         config_file=flask_app.config['CONFIG_FILE'],
+        # Web-originated products are untrusted input: refuse fetches (and
+        # redirect hops) that target non-public hosts. The CLI, which only
+        # checks operator-curated products, keeps unrestricted fetching.
+        extractor_factory=lambda: PriceExtractor(
+            user_agent=flask_app.config['USER_AGENT'],
+            timeout=flask_app.config['TIMEOUT'],
+            max_retries=flask_app.config['MAX_RETRIES'],
+            require_public_urls=True,
+        ),
     )
     flask_app.config['_IMAGE_SERVICE'] = ImageService(
         user_agent=flask_app.config['USER_AGENT'],
@@ -111,17 +121,9 @@ def create_app():
         return response
 
     # --------------- Blueprints ---------------
-    from sale_monitor.web.routes import (
-        alerts,
-        compare,
-        health,
-        history,
-        images,
-        pages,
-        products,
-        purchases,
-        settings,
-    )
+    from sale_monitor.web.routes import (alerts, compare, health, history,
+                                         images, pages, products, purchases,
+                                         settings)
     for module in (pages, products, history, alerts, compare, settings, health, images, purchases):
         flask_app.register_blueprint(module.bp)
 

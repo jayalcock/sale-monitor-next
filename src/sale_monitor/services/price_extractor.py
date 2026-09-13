@@ -1,9 +1,9 @@
+import json
 import logging
 import re
 import time
-import json
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,7 +33,9 @@ class ExtractionResult:
 class PriceExtractor:
     """Handles price extraction from web pages."""
 
-    def __init__(self, user_agent: str, timeout: int = 30, max_retries: int = 3):
+    def __init__(self, user_agent: str, timeout: int = 30, max_retries: int = 3,
+                 require_public_urls: bool = False):
+        self.require_public_urls = require_public_urls
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": user_agent,
@@ -56,6 +58,21 @@ class PriceExtractor:
         self._last_response_html: Optional[str] = None
         self._last_response_url: Optional[str] = None
 
+    def _get(self, url: str, timeout) -> requests.Response:
+        """GET *url*, honoring ``require_public_urls``.
+
+        Extractors created for web-originated products route every fetch
+        through ``safe_get`` so that a stored URL (or a redirect hop) that
+        points at a non-public host is refused instead of fetched.
+        """
+        if self.require_public_urls:
+            from sale_monitor.services.http_safety import safe_get
+            resp = safe_get(url, headers=dict(self.session.headers), timeout=timeout)
+            if resp is None:
+                raise requests.RequestException(f"Blocked fetch of non-public URL: {url}")
+            return resp
+        return self.session.get(url, timeout=timeout)
+
     def extract_price(self, url: str, selector: str = "") -> Tuple[Optional[float], str]:
         """Extract price from a webpage using CSS selector or auto-detection.
         
@@ -63,7 +80,7 @@ class PriceExtractor:
             Tuple of (price, selector_source) where selector_source is 'manual', 'auto', or empty string on failure
         """
         import random
-        
+
         # Add randomized delay for Amazon to avoid rate limiting
         if 'amazon.' in url.lower():
             delay = random.uniform(1.0, 3.0)
@@ -79,7 +96,7 @@ class PriceExtractor:
         
         for attempt in range(self.max_retries):
             try:
-                resp = self.session.get(url, timeout=self.timeout)
+                resp = self._get(url, self.timeout)
                 if resp.status_code != 200:
                     logging.warning("GET %s -> %s", url, resp.status_code)
                     raise requests.RequestException(f"HTTP {resp.status_code}")
@@ -195,7 +212,7 @@ class PriceExtractor:
             else:
                 try:
                     detection_timeout = min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5
-                    resp = self.session.get(url, timeout=detection_timeout)
+                    resp = self._get(url, detection_timeout)
                     if resp.status_code == 200:
                         html_text = resp.text
                 except requests.exceptions.RequestException:
@@ -605,7 +622,7 @@ class PriceExtractor:
         Does not parse or return price; lightweight fetch with current timeout settings.
         """
         try:
-            resp = self.session.get(url, timeout=min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5)
+            resp = self._get(url, min(int(self.timeout), 5) if isinstance(self.timeout, int) else 5)
             if resp.status_code == 200 and resp.text:
                 return self._extract_identifiers_from_html(resp.text)
         except requests.exceptions.RequestException:
